@@ -23,21 +23,26 @@ import {
   YAxis,
 } from 'recharts'
 import { toast } from 'sonner'
+import { USER_ROLES } from '../../contracts/auth.js'
 import { calculateQuote, formatMoney } from '../dealMath.js'
 import { dashboardTrend } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatCard } from '../components/Ui.jsx'
 
 const chartTooltipStyle = {
-  background: '#111a2b',
-  border: '1px solid rgba(174,196,230,.16)',
+  background: 'var(--ws-panel)',
+  border: '1px solid var(--ws-line)',
   borderRadius: 10,
+  color: 'var(--ws-text)',
   fontSize: 11,
 }
 
 export default function DashboardPage() {
   const { quotes, user, createQuote } = useWorkspace()
   const navigate = useNavigate()
+  const isSalesRep = user.role === USER_ROLES.SALES_REP
+  const isManager = user.role === USER_ROLES.MANAGER
+  const isAdmin = user.role === USER_ROLES.ADMIN
   const pending = quotes.filter((quote) => quote.stage === 'PENDING_APPROVAL')
   const pipelineValue = quotes.reduce(
     (sum, quote) => sum + calculateQuote(quote).total,
@@ -51,6 +56,15 @@ export default function DashboardPage() {
     const risk = calculateQuote(quote).riskScore
     return risk >= 55 || quote.deliveryRisk === 'High' || quote.inactivityDays >= 3
   })
+  const fulfilled = quotes.filter((quote) => ['CONFIRMED', 'FULFILLMENT'].includes(quote.stage))
+  const maxStageCount = Math.max(
+    1,
+    ...['DRAFT', 'PENDING_APPROVAL', 'NEGOTIATION', 'FULFILLMENT']
+      .map((stage) => quotes.filter((quote) => quote.stage === stage).length),
+  )
+  const trendPercent = dashboardTrend.length > 1
+    ? ((dashboardTrend.at(-1).revenue - dashboardTrend[0].revenue) / dashboardTrend[0].revenue) * 100
+    : 0
 
   function newQuote() {
     navigate(`/quotations/${createQuote()}`)
@@ -65,14 +79,18 @@ export default function DashboardPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Friday, 5 September"
-        title={`Good afternoon, ${user.fullName.split(' ')[0]}.`}
-        description="Here is where your revenue, approvals and delivery promises need attention."
-        actions={
+        eyebrow={isAdmin ? 'Platform overview' : isManager ? 'Deal health' : 'Sales workspace'}
+        title={`Welcome, ${user.fullName.split(' ')[0]}.`}
+        description={isAdmin
+          ? 'Monitor sales performance and keep the platform configuration ready for the team.'
+          : isManager
+            ? 'Review commercial risk, stalled deals and decisions that need your attention.'
+            : 'Build quotations and follow each deal through approval and fulfillment.'}
+        actions={isSalesRep ? (
           <button type="button" className="button button--primary" onClick={newQuote}>
             <Plus size={16} /> New quotation
           </button>
-        }
+        ) : null}
       />
 
       <section className="stats-grid">
@@ -80,28 +98,28 @@ export default function DashboardPage() {
           icon={BadgeIndianRupee}
           label="Open pipeline"
           value={formatMoney(pipelineValue, true)}
-          detail="12.4% above last week"
+          detail={`${quotes.length} active quotation${quotes.length === 1 ? '' : 's'}`}
           tone="blue"
         />
         <StatCard
           icon={CircleCheckBig}
           label="Confirmed value"
           value={formatMoney(confirmedValue, true)}
-          detail="2 orders ready for billing"
+          detail={`${fulfilled.length} order${fulfilled.length === 1 ? '' : 's'} confirmed or fulfilling`}
           tone="green"
         />
         <StatCard
           icon={FileClock}
           label="Awaiting approval"
           value={String(pending.length)}
-          detail="Oldest waiting 3h 18m"
+          detail={`${pending.length} pricing decision${pending.length === 1 ? '' : 's'} open`}
           tone="amber"
         />
         <StatCard
           icon={AlertTriangle}
           label="Deals at risk"
           value={String(atRisk.length)}
-          detail={`${stalled.length} stalled conversation`}
+          detail={`${stalled.length} stalled conversation${stalled.length === 1 ? '' : 's'}`}
           tone="red"
         />
       </section>
@@ -110,7 +128,7 @@ export default function DashboardPage() {
         <Panel
           title="Revenue momentum"
           description="Quoted revenue and blended margin over the last seven days."
-          action={<span className="panel-chip"><TrendingUp size={14} /> +18.2%</span>}
+          action={<span className="panel-chip"><TrendingUp size={14} /> {trendPercent >= 0 ? '+' : ''}{trendPercent.toFixed(1)}%</span>}
           className="dashboard-chart-panel"
         >
           <div className="chart-legend">
@@ -138,23 +156,27 @@ export default function DashboardPage() {
         </Panel>
 
         <Panel
-          title="Approval queue"
-          description="Deals currently waiting for a pricing decision."
+          title={isManager ? 'Approval queue' : isAdmin ? 'Reporting snapshot' : 'Recent quotations'}
+          description={isManager
+            ? 'Deals currently waiting for your pricing decision.'
+            : isAdmin
+              ? 'Current commercial activity available in organization reports.'
+              : 'Your latest deals and their next required step.'}
           action={
-            <button className="link-button" type="button" onClick={() => navigate('/approvals')}>
+            <button className="link-button" type="button" onClick={() => navigate(isManager ? '/approvals' : isAdmin ? '/reports' : '/quotations')}>
               View all <ArrowUpRight size={14} />
             </button>
           }
         >
           <div className="compact-list">
-            {pending.map((quote) => {
+            {(isManager ? pending : quotes.slice(0, 4)).map((quote) => {
               const calculation = calculateQuote(quote)
               return (
                 <button
                   className="compact-row"
                   type="button"
                   key={quote.id}
-                  onClick={() => navigate(`/approvals/${quote.id}`)}
+                  onClick={() => navigate(isManager ? `/approvals/${quote.id}` : isAdmin ? '/reports' : `/quotations/${quote.id}`)}
                 >
                   <span className="compact-row__icon"><Clock3 size={16} /></span>
                   <span className="compact-row__copy">
@@ -165,7 +187,7 @@ export default function DashboardPage() {
                 </button>
               )
             })}
-            {!pending.length && <p className="empty-copy">No approvals are waiting.</p>}
+            {!(isManager ? pending : quotes).length && <p className="empty-copy">Nothing needs attention.</p>}
           </div>
         </Panel>
       </section>
@@ -186,7 +208,11 @@ export default function DashboardPage() {
                   <span className={`alert-row__icon ${delivery ? 'danger' : stalledDeal ? 'warning' : 'violet'}`}>
                     {delivery ? <PackageCheck size={17} /> : stalledDeal ? <BellRing size={17} /> : <Sparkles size={17} />}
                   </span>
-                  <button type="button" className="alert-row__main" onClick={() => navigate(`/quotations/${quote.id}`)}>
+                  <button
+                    type="button"
+                    className="alert-row__main"
+                    onClick={() => navigate(isManager ? `/approvals/${quote.id}` : isAdmin ? '/reports' : `/quotations/${quote.id}`)}
+                  >
                     <strong>
                       {delivery
                         ? 'Delivery promise may slip'
@@ -196,13 +222,15 @@ export default function DashboardPage() {
                     </strong>
                     <small>{quote.customer.name} · {quote.id} · risk {calculation.riskScore}</small>
                   </button>
-                  <button
-                    className="button button--quiet button--small"
-                    type="button"
-                    onClick={() => triggerAlertAction(quote, stalledDeal ? 'Nudge' : 'Escalation')}
-                  >
-                    <Send size={13} /> {stalledDeal ? 'Nudge' : 'Escalate'}
-                  </button>
+                  {!isAdmin && (
+                    <button
+                      className="button button--quiet button--small"
+                      type="button"
+                      onClick={() => triggerAlertAction(quote, stalledDeal && !isManager ? 'Nudge' : 'Escalation')}
+                    >
+                      <Send size={13} /> {stalledDeal && !isManager ? 'Nudge' : 'Escalate'}
+                    </button>
+                  )}
                 </article>
               )
             })}
@@ -212,19 +240,19 @@ export default function DashboardPage() {
         <Panel title="Pipeline focus" description="Current quotation stages by count.">
           <div className="pipeline-focus">
             {[
-              ['Draft', quotes.filter((quote) => quote.stage === 'DRAFT').length, 24],
-              ['Approval', pending.length, 44],
-              ['Negotiation', quotes.filter((quote) => quote.stage === 'NEGOTIATION').length, 61],
-              ['Fulfillment', quotes.filter((quote) => quote.stage === 'FULFILLMENT').length, 82],
-            ].map(([label, count, width]) => (
+              ['Draft', quotes.filter((quote) => quote.stage === 'DRAFT').length],
+              ['Approval', pending.length],
+              ['Negotiation', quotes.filter((quote) => quote.stage === 'NEGOTIATION').length],
+              ['Fulfillment', quotes.filter((quote) => quote.stage === 'FULFILLMENT').length],
+            ].map(([label, count]) => (
               <div key={label}>
                 <span><strong>{label}</strong><small>{count} deals</small></span>
-                <i><b style={{ width: `${Math.max(width, count ? width : 6)}%` }} /></i>
+                <i><b style={{ width: `${count ? Math.max(8, (count / maxStageCount) * 100) : 0}%` }} /></i>
               </div>
             ))}
           </div>
-          <button className="button button--secondary button--full" type="button" onClick={() => navigate('/pipeline')}>
-            Open Kanban pipeline
+          <button className="button button--secondary button--full" type="button" onClick={() => navigate(isAdmin ? '/reports' : isManager ? '/approvals' : '/pipeline')}>
+            {isAdmin ? 'Open organization reports' : isManager ? 'Open approval queue' : 'Open Kanban pipeline'}
           </button>
         </Panel>
       </section>

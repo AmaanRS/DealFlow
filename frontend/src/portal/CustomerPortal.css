@@ -6,13 +6,14 @@
 }
 
 .portal-page--gate {
+  position: relative;
   display: grid;
   place-items: center;
   padding: 28px;
-  color: #edf4ff;
+  color: #172033;
   background:
-    radial-gradient(circle at 75% 18%, rgba(57, 124, 240, 0.28), transparent 32rem),
-    linear-gradient(145deg, #07101e, #0d1728 64%, #0a1321);
+    radial-gradient(circle at 75% 18%, rgba(57, 124, 240, 0.12), transparent 32rem),
+    linear-gradient(145deg, #f5f8fc, #eef4fb 64%, #f8fafd);
 }
 
 .portal-gate {
@@ -23,10 +24,10 @@
   align-items: flex-start;
   justify-content: center;
   padding: clamp(32px, 7vw, 72px);
-  border: 1px solid rgba(170, 195, 232, 0.18);
+  border: 1px solid #dae3ee;
   border-radius: 28px;
-  background: rgba(10, 20, 35, 0.86);
-  box-shadow: 0 36px 90px rgba(0, 0, 0, 0.38);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 30px 80px rgba(37, 59, 91, 0.13);
 }
 
 .portal-brand {
@@ -105,7 +106,7 @@
 .portal-gate h1 {
   max-width: 430px;
   margin: 12px 0 16px;
-  color: #f5f8ff;
+  color: #172033;
   font-size: clamp(32px, 6vw, 46px);
   line-height: 1.05;
   letter-spacing: -1.8px;
@@ -114,7 +115,7 @@
 .portal-gate > p {
   max-width: 450px;
   margin: 0;
-  color: #8ea0bb;
+  color: #68778c;
   font-size: 13px;
   line-height: 1.7;
 }
@@ -133,7 +134,7 @@
 
 .portal-error {
   border: 1px solid rgba(255, 118, 132, 0.28);
-  color: #ffc5cd;
+  color: #9f293b;
   background: rgba(255, 103, 121, 0.09);
 }
 
@@ -157,12 +158,12 @@
 }
 
 .portal-security-note strong {
-  color: #c8d5e8;
+  color: #3d5069;
   font-size: 11px;
 }
 
 .portal-security-note small {
-  color: #778aa6;
+  color: #6b7b91;
   font-size: 10px;
 }
 
@@ -171,14 +172,14 @@
   align-items: center;
   gap: 11px;
   margin-top: 72px;
-  color: #aab9ce;
+  color: #6b7b91;
   font-size: 12px;
 }
 
 .portal-loading span {
   width: 17px;
   height: 17px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(45, 70, 108, 0.14);
   border-top-color: #6da4ff;
   border-radius: 50%;
   animation: portal-spin 700ms linear infinite;
@@ -203,8 +204,20 @@
   backdrop-filter: blur(16px);
 }
 
-.customer-topbar > button {
+.customer-topbar__actions {
+  display: flex;
   justify-self: end;
+  align-items: center;
+  gap: 8px;
+}
+
+.customer-topbar__actions > button,
+.portal-theme-toggle {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   padding: 9px 13px;
   border: 1px solid #d6dfeb;
   border-radius: 9px;
@@ -214,9 +227,17 @@
   font-weight: 750;
 }
 
-.customer-topbar > button:hover {
+.customer-topbar__actions > button:hover,
+.portal-theme-toggle:hover {
   border-color: #aabbd1;
   color: #172033;
+}
+
+.portal-page--gate > .portal-theme-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 24px;
+  right: 24px;
 }
 
 .customer-topbar__secure {
@@ -592,6 +613,122 @@
   line-height: 1.45;
   text-align: center;
 }
+
+:root[data-theme="dark"] .portal-page,
+:root[data-theme="dark"] .customer-workspace {
+  color: #edf4ff;
+  background: #09111d;
+}
+
+:root[data-theme="dark"] .portal-page--gate {
+  color: #edf4ff;
+  background:
+    radial-gradient(circle at 75% 18%, rgba(57, 124, 240, 0.28), transparent 32rem),
+    linear-gradient(145deg, #07101e, #0d1728 64%, #0a1321);
+}
+
+:root[data-theme="dark"] .portal-gate {
+  border-color: rgba(170, 195, 232, 0.18);
+  background: rgba(10, 20, 35, 0.86);
+  box-shadow: 0 36px 90px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme="dark"] .portal-gate h1 { color: #f5f8ff; }
+:root[data-theme="dark"] .portal-gate > p { color: #8ea0bb; }
+:root[data-theme="dark"] .portal-security-note strong { color: #c8d5e8; }
+:root[data-theme="dark"] .portal-security-note small,
+:root[data-theme="dark"] .portal-loading { color: #778aa6; }
+:root[data-theme="dark"] .portal-error { color: #ffc5cd; }
+:root[data-theme="dark"] .portal-loading span { border-color: rgba(255, 255, 255, 0.2); border-top-color: #6da4ff; }
+
+:root[data-theme="dark"] .portal-theme-toggle,
+:root[data-theme="dark"] .customer-topbar__actions > button {
+  border-color: #29394f;
+  color: #aebdd1;
+  background: #111c2c;
+}
+
+:root[data-theme="dark"] .customer-topbar {
+  border-color: #223146;
+  background: rgba(10, 18, 30, 0.94);
+}
+
+:root[data-theme="dark"] .customer-topbar__secure,
+:root[data-theme="dark"] .customer-hero p,
+:root[data-theme="dark"] .customer-card > header > span,
+:root[data-theme="dark"] .customer-line__top small,
+:root[data-theme="dark"] .customer-summary dl > div,
+:root[data-theme="dark"] .portal-help {
+  color: #8d9db3;
+}
+
+:root[data-theme="dark"] .customer-hero h1,
+:root[data-theme="dark"] .customer-card > header h2,
+:root[data-theme="dark"] .customer-summary h2,
+:root[data-theme="dark"] .customer-line__top strong,
+:root[data-theme="dark"] .customer-summary .customer-total,
+:root[data-theme="dark"] .customer-summary dd {
+  color: #eef4ff;
+}
+
+:root[data-theme="dark"] .customer-card {
+  border-color: #26364b;
+  background: #101a29;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-theme="dark"] .customer-card > header,
+:root[data-theme="dark"] .customer-lines article,
+:root[data-theme="dark"] .customer-summary .customer-total {
+  border-color: #26364b;
+}
+
+:root[data-theme="dark"] .customer-lines label,
+:root[data-theme="dark"] .customer-negotiation-grid textarea,
+:root[data-theme="dark"] .counter-input {
+  border-color: #2a3a50;
+  color: #9aabc1;
+  background: #0d1624;
+}
+
+:root[data-theme="dark"] .customer-lines input,
+:root[data-theme="dark"] .customer-negotiation-grid textarea,
+:root[data-theme="dark"] .counter-input input {
+  color: #eaf1fc;
+}
+
+:root[data-theme="dark"] .customer-negotiation-grid label { color: #b9c5d6; }
+:root[data-theme="dark"] .customer-confirm { border-color: #34465e; color: #9fe2c1; background: #111c2c; }
+:root[data-theme="dark"] .customer-validity { color: #77aaff; background: rgba(65, 130, 238, 0.11); }
+:root[data-theme="dark"] .customer-validity strong { color: #b9d1ef; }
+:root[data-theme="dark"] .customer-validity small { color: #8295ad; }
+
+/* Customer-facing copy uses presentation-friendly sizes as well. */
+.portal-brand strong { font-size: 20px; }
+.portal-brand small { font-size: 11px; }
+.portal-theme-toggle,
+.customer-topbar__actions > button { font-size: 13px; }
+.portal-eyebrow { font-size: 12px; }
+.portal-gate > p,
+.customer-hero p { font-size: 15px; }
+.portal-security-note strong,
+.customer-line__top strong,
+.customer-negotiation-grid label,
+.customer-summary .customer-total { font-size: 13px; }
+.portal-security-note small,
+.customer-card > header > span,
+.customer-line__top small,
+.customer-negotiation-grid label > small,
+.customer-summary dl > div,
+.customer-validity strong,
+.customer-primary,
+.customer-confirm { font-size: 12px; }
+.customer-card > header h2,
+.customer-summary h2 { font-size: 19px; }
+.customer-lines input,
+.customer-negotiation-grid textarea,
+.counter-input input { font-size: 13px; }
+.portal-help { font-size: 11px; }
 
 @media (max-width: 900px) {
   .customer-layout {

@@ -5,8 +5,10 @@ import {
   Clock3,
   LockKeyhole,
   MessageSquareText,
+  Moon,
   Send,
   ShieldCheck,
+  Sun,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast, Toaster } from 'sonner'
@@ -24,9 +26,25 @@ function PortalBrand() {
   )
 }
 
-function MagicLinkRequired({ error }) {
+function PortalThemeToggle({ theme, onToggle }) {
+  const dark = theme === 'dark'
+  return (
+    <button
+      className="portal-theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}
+    >
+      {dark ? <Sun size={15} /> : <Moon size={15} />}
+      <span>{dark ? 'Light' : 'Dark'}</span>
+    </button>
+  )
+}
+
+function MagicLinkRequired({ error, theme, onThemeToggle }) {
   return (
     <main className="portal-page portal-page--gate">
+      <PortalThemeToggle theme={theme} onToggle={onThemeToggle} />
       <section className="portal-gate">
         <PortalBrand />
         <span className="portal-gate__icon"><LockKeyhole size={25} /></span>
@@ -40,7 +58,7 @@ function MagicLinkRequired({ error }) {
   )
 }
 
-function CustomerQuotation({ session, onLogout }) {
+function CustomerQuotation({ session, onLogout, theme, onThemeToggle }) {
   const quote = useMemo(
     () => initialQuotes.find((item) => item.customer.email === session.customer.email) ?? initialQuotes[0],
     [session.customer.email],
@@ -79,7 +97,10 @@ function CustomerQuotation({ session, onLogout }) {
       <header className="customer-topbar">
         <PortalBrand />
         <div className="customer-topbar__secure"><LockKeyhole size={14} /> Secure customer view</div>
-        <button type="button" onClick={onLogout}>Close session</button>
+        <div className="customer-topbar__actions">
+          <PortalThemeToggle theme={theme} onToggle={onThemeToggle} />
+          <button type="button" onClick={onLogout}>Close session</button>
+        </div>
       </header>
 
       <div className="customer-content">
@@ -146,12 +167,12 @@ function CustomerQuotation({ session, onLogout }) {
           </aside>
         </div>
       </div>
-      <Toaster position="top-right" theme="dark" richColors />
+      <Toaster position="top-right" theme={theme} richColors />
     </main>
   )
 }
 
-export default function CustomerPortal() {
+export default function CustomerPortal({ theme, onThemeToggle }) {
   const [session, setSession] = useState(null)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState('')
@@ -185,9 +206,10 @@ export default function CustomerPortal() {
   }
 
   if (checking) {
-    return <main className="portal-page portal-page--gate"><section className="portal-gate"><PortalBrand /><div className="portal-loading"><span /> Opening your secure quotation…</div></section></main>
+    return <main className="portal-page portal-page--gate"><PortalThemeToggle theme={theme} onToggle={onThemeToggle} /><section className="portal-gate"><PortalBrand /><div className="portal-loading"><span /> Opening your secure quotation…</div></section></main>
   }
 
-  return session ? <CustomerQuotation session={session} onLogout={closeSession} /> : <MagicLinkRequired error={error} />
+  return session
+    ? <CustomerQuotation session={session} onLogout={closeSession} theme={theme} onThemeToggle={onThemeToggle} />
+    : <MagicLinkRequired error={error} theme={theme} onThemeToggle={onThemeToggle} />
 }
-

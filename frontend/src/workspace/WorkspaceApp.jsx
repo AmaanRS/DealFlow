@@ -2,19 +2,17 @@ import { lazy, Suspense, useState } from 'react'
 import {
   BadgeIndianRupee,
   Boxes,
-  Building2,
   ChartNoAxesCombined,
-  ChevronDown,
   ClipboardCheck,
   FileChartColumn,
   FileText,
   KanbanSquare,
   LogOut,
   Menu,
+  Moon,
   Plus,
-  RefreshCw,
-  Search,
   Settings2,
+  Sun,
   UserRoundCheck,
   X,
 } from 'lucide-react'
@@ -28,6 +26,7 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { Toaster, toast } from 'sonner'
+import { USER_ROLES } from '../contracts/auth.js'
 import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx'
 import { Avatar } from './components/Ui.jsx'
 import './Workspace.css'
@@ -45,28 +44,68 @@ const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'))
 const navigation = [
   {
     label: 'Overview',
-    links: [{ to: '/dashboard', label: 'Deal health', icon: ChartNoAxesCombined }],
+    links: [{
+      to: '/dashboard',
+      label: 'Overview',
+      icon: ChartNoAxesCombined,
+      roles: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+    }],
   },
   {
     label: 'Sales workspace',
     links: [
-      { to: '/quotations', label: 'Quotations', icon: FileText },
-      { to: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
-      { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
+      {
+        to: '/quotations',
+        label: 'Quotations',
+        icon: FileText,
+        roles: [USER_ROLES.SALES_REP],
+      },
+      {
+        to: '/pipeline',
+        label: 'Pipeline',
+        icon: KanbanSquare,
+        roles: [USER_ROLES.SALES_REP],
+      },
+      {
+        to: '/approvals',
+        label: 'Approvals',
+        icon: ClipboardCheck,
+        roles: [USER_ROLES.MANAGER, USER_ROLES.FINANCE],
+      },
     ],
   },
   {
     label: 'Operations',
     links: [
-      { to: '/fulfillment', label: 'Fulfillment', icon: Boxes },
-      { to: '/billing', label: 'Billing', icon: BadgeIndianRupee },
+      {
+        to: '/fulfillment',
+        label: 'Fulfillment',
+        icon: Boxes,
+        roles: [USER_ROLES.SALES_REP, USER_ROLES.FINANCE],
+      },
+      {
+        to: '/billing',
+        label: 'Billing',
+        icon: BadgeIndianRupee,
+        roles: [USER_ROLES.FINANCE],
+      },
     ],
   },
   {
     label: 'Manage',
     links: [
-      { to: '/configuration', label: 'Configuration', icon: Settings2 },
-      { to: '/reports', label: 'Reports', icon: FileChartColumn },
+      {
+        to: '/configuration',
+        label: 'Configuration',
+        icon: Settings2,
+        roles: [USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+      },
+      {
+        to: '/reports',
+        label: 'Reports',
+        icon: FileChartColumn,
+        roles: [USER_ROLES.MANAGER, USER_ROLES.FINANCE, USER_ROLES.ADMIN],
+      },
     ],
   },
   {
@@ -76,14 +115,14 @@ const navigation = [
         to: '/admin/users',
         label: 'User approvals',
         icon: UserRoundCheck,
-        roles: ['ADMIN'],
+        roles: [USER_ROLES.ADMIN],
       },
     ],
   },
 ]
 
 const routeTitles = {
-  dashboard: 'Deal health',
+  dashboard: 'Overview',
   quotations: 'Quotations',
   pipeline: 'Sales pipeline',
   approvals: 'Discount approvals',
@@ -92,6 +131,25 @@ const routeTitles = {
   configuration: 'Back-end configuration',
   admin: 'User administration',
   reports: 'Sales reporting',
+}
+
+const routeRoles = {
+  dashboard: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+  quotations: [USER_ROLES.SALES_REP],
+  pipeline: [USER_ROLES.SALES_REP],
+  approvals: [USER_ROLES.MANAGER, USER_ROLES.FINANCE],
+  fulfillment: [USER_ROLES.SALES_REP, USER_ROLES.FINANCE],
+  billing: [USER_ROLES.FINANCE],
+  configuration: [USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+  reports: [USER_ROLES.MANAGER, USER_ROLES.FINANCE, USER_ROLES.ADMIN],
+  admin: [USER_ROLES.ADMIN],
+}
+
+const homeByRole = {
+  [USER_ROLES.ADMIN]: '/configuration',
+  [USER_ROLES.MANAGER]: '/dashboard',
+  [USER_ROLES.FINANCE]: '/approvals',
+  [USER_ROLES.SALES_REP]: '/dashboard',
 }
 
 function BrandMark() {
@@ -104,23 +162,20 @@ function BrandMark() {
   )
 }
 
-function WorkspaceShell({ onLogout }) {
+function WorkspaceShell({ onLogout, theme, onThemeToggle }) {
   const { user, createQuote } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const section = location.pathname.split('/')[1] || 'dashboard'
+  const homePath = homeByRole[user.role] ?? '/dashboard'
+  const canCreateQuote = user.role === USER_ROLES.SALES_REP
+  const routeAllowed = (route) => routeRoles[route]?.includes(user.role)
 
   function startQuote() {
     const id = createQuote()
     navigate(`/quotations/${id}`)
     toast.success('Quotation draft created')
-  }
-
-  function syncData() {
-    toast.success('Pricing, stock and approval data are up to date', {
-      description: 'Last synchronized just now.',
-    })
   }
 
   async function closeWorkspace() {
@@ -132,13 +187,13 @@ function WorkspaceShell({ onLogout }) {
     <div className="workspace-root">
       <aside className={`workspace-sidebar ${mobileNavOpen ? 'is-open' : ''}`}>
         <div className="workspace-sidebar__top">
-          <a className="workspace-brand" href="/dashboard">
+          <NavLink className="workspace-brand" to={homePath}>
             <BrandMark />
             <span>
               <strong>DealFlow</strong>
               <small>Sales operations</small>
             </span>
-          </a>
+          </NavLink>
           <button
             type="button"
             className="icon-button workspace-sidebar__close"
@@ -152,7 +207,7 @@ function WorkspaceShell({ onLogout }) {
         <nav className="workspace-nav" aria-label="Main navigation">
           {navigation.map((group) => {
             const visibleLinks = group.links.filter(
-              ({ roles }) => !roles || roles.includes(user.role),
+              ({ roles }) => roles.includes(user.role),
             )
             if (!visibleLinks.length) return null
 
@@ -176,24 +231,9 @@ function WorkspaceShell({ onLogout }) {
         </nav>
 
         <div className="workspace-sidebar__actions">
-          {/* <button type="button" onClick={()=> setCount(counts + 1)}>
-           +
-          </button>
-          <span>Count {counts}</span>
-          <button type="button" onClick={()=> setCount(counts - 1)}>
-           -
-          </button> */}
-          <button type="button" onClick={syncData}>
-            <RefreshCw size={16} />
-            Reload data
-          </button>
-          <button type="button" onClick={() => navigate('/configuration')}>
-            <Building2 size={16} />
-            Go to back-end
-          </button>
           <button type="button" onClick={closeWorkspace}>
             <LogOut size={16} />
-            Close workspace
+            Log out
           </button>
         </div>
 
@@ -203,7 +243,6 @@ function WorkspaceShell({ onLogout }) {
             <strong>{user.fullName}</strong>
             <small>{user.role?.replaceAll('_', ' ')}</small>
           </span>
-          <ChevronDown size={15} />
         </div>
       </aside>
 
@@ -219,61 +258,69 @@ function WorkspaceShell({ onLogout }) {
       <div className="workspace-main">
         <header className="workspace-topbar">
           <div className="workspace-topbar__title">
-            <button
-              type="button"
-              className="icon-button workspace-menu-button"
-              onClick={() => setMobileNavOpen(true)}
-              aria-label="Open navigation"
-            >
-              <Menu size={20} />
-            </button>
+            {!mobileNavOpen && (
+              <button
+                type="button"
+                className="icon-button workspace-menu-button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Open navigation"
+              >
+                <Menu size={20} />
+              </button>
+            )}
             <span>DealFlow360</span>
             <strong>{routeTitles[section] ?? 'Workspace'}</strong>
           </div>
 
           <div className="workspace-topbar__actions">
-            <label className="workspace-search">
-              <Search size={16} />
-              <input placeholder="Search quotes, customers…" aria-label="Search workspace" />
-              <kbd>⌘ K</kbd>
-            </label>
-            <button className="workspace-new-button" type="button" onClick={startQuote}>
-              <Plus size={17} />
-              <span>New quotation</span>
+            <button
+              className="workspace-theme-toggle"
+              type="button"
+              onClick={onThemeToggle}
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
+            {canCreateQuote && (
+              <button className="workspace-new-button" type="button" onClick={startQuote}>
+                <Plus size={17} />
+                <span>New quotation</span>
+              </button>
+            )}
           </div>
         </header>
 
         <div className="workspace-content">
           <Suspense fallback={<div className="workspace-loading"><span /> Loading workspace…</div>}>
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/quotations" element={<QuotationsPage />} />
-              <Route path="/quotations/:quoteId" element={<QuotationBuilderPage />} />
-              <Route path="/pipeline" element={<PipelinePage />} />
-              <Route path="/approvals" element={<ApprovalsPage />} />
-              <Route path="/approvals/:quoteId" element={<ApprovalsPage />} />
-              <Route path="/fulfillment" element={<FulfillmentPage />} />
-              <Route path="/billing" element={<BillingPage />} />
-              <Route path="/configuration" element={<ConfigurationPage />} />
+              <Route path="/" element={<Navigate to={homePath} replace />} />
+              <Route path="/dashboard" element={routeAllowed('dashboard') ? <DashboardPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/quotations" element={routeAllowed('quotations') ? <QuotationsPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/quotations/:quoteId" element={routeAllowed('quotations') ? <QuotationBuilderPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/pipeline" element={routeAllowed('pipeline') ? <PipelinePage /> : <Navigate to={homePath} replace />} />
+              <Route path="/approvals" element={routeAllowed('approvals') ? <ApprovalsPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/approvals/:quoteId" element={routeAllowed('approvals') ? <ApprovalsPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/fulfillment" element={routeAllowed('fulfillment') ? <FulfillmentPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/billing" element={routeAllowed('billing') ? <BillingPage /> : <Navigate to={homePath} replace />} />
+              <Route path="/configuration" element={routeAllowed('configuration') ? <ConfigurationPage initialTab={user.role === USER_ROLES.MANAGER ? 'discounts' : 'products'} /> : <Navigate to={homePath} replace />} />
               <Route
                 path="/admin/users"
                 element={
-                  user.role === 'ADMIN'
+                  user.role === USER_ROLES.ADMIN
                     ? <ConfigurationPage initialTab="access" />
                     : <Navigate to="/dashboard" replace />
                 }
               />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/reports" element={routeAllowed('reports') ? <ReportsPage /> : <Navigate to={homePath} replace />} />
+              <Route path="*" element={<Navigate to={homePath} replace />} />
             </Routes>
           </Suspense>
         </div>
       </div>
       <Toaster
         position="top-right"
-        theme="dark"
+        theme={theme}
         richColors
         toastOptions={{ className: 'dealflow-toast' }}
       />
@@ -281,11 +328,15 @@ function WorkspaceShell({ onLogout }) {
   )
 }
 
-export default function WorkspaceApp({ user, onLogout }) {
+export default function WorkspaceApp({ user, onLogout, theme, onThemeToggle }) {
   return (
     <BrowserRouter>
       <WorkspaceProvider user={user}>
-        <WorkspaceShell onLogout={onLogout} />
+        <WorkspaceShell
+          onLogout={onLogout}
+          theme={theme}
+          onThemeToggle={onThemeToggle}
+        />
       </WorkspaceProvider>
     </BrowserRouter>
   )

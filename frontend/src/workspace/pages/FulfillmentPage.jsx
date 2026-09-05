@@ -12,13 +12,15 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { USER_ROLES } from '../../contracts/auth.js'
 import { calculateQuote, formatMoney, getRecommendedSplit } from '../dealMath.js'
 import { warehouseData } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatusBadge } from '../components/Ui.jsx'
 
 export default function FulfillmentPage() {
-  const { quotes, updateQuote } = useWorkspace()
+  const { quotes, updateQuote, user } = useWorkspace()
+  const canManage = user.role === USER_ROLES.FINANCE
   const eligible = quotes.filter((quote) => ['APPROVED', 'FULFILLMENT', 'CONFIRMED'].includes(quote.stage))
   const [quoteId, setQuoteId] = useState(eligible.find((quote) => quote.stage === 'FULFILLMENT')?.id || eligible[0]?.id)
   const quote = eligible.find((item) => item.id === quoteId)
@@ -79,7 +81,9 @@ export default function FulfillmentPage() {
       <PageHeader
         eyebrow="Operations"
         title="Warehouse fulfillment"
-        description="Minimize shipments while protecting live stock and the promised delivery date."
+        description={canManage
+          ? 'Allocate approved orders while protecting live stock and the promised delivery date.'
+          : 'Track inventory allocation, shipment groups and the promised delivery date.'}
         actions={
           <label className="header-select">
             <span>Order</span>
@@ -97,7 +101,7 @@ export default function FulfillmentPage() {
         <article><span><PackageCheck size={17} /></span><div><small>Backordered units</small><strong>{backordered}</strong></div></article>
       </section>
 
-      {backorderReady && (
+      {backorderReady && canManage && (
         <section className="backorder-callout">
           <span><RefreshCcw size={19} /></span>
           <div><strong>New inventory can reduce this order to two shipments.</strong><p>Six ApexBook Pro units arrived at Main Warehouse after the original allocation.</p></div>
@@ -124,7 +128,7 @@ export default function FulfillmentPage() {
                     {shipment.lines.map((line, lineIndex) => (
                       <div key={`${shipment.warehouseId}-${line.productId}`}>
                         <span><strong>{line.name}</strong><small>Reserved from live stock</small></span>
-                        {manual ? <input type="number" min="0" value={line.quantity} onChange={(event) => adjustQuantity(shipmentIndex, lineIndex, event.target.value)} /> : <strong>{line.quantity} units</strong>}
+                        {manual && canManage ? <input type="number" min="0" value={line.quantity} onChange={(event) => adjustQuantity(shipmentIndex, lineIndex, event.target.value)} /> : <strong>{line.quantity} units</strong>}
                       </div>
                     ))}
                   </div>
@@ -135,19 +139,25 @@ export default function FulfillmentPage() {
         </div>
 
         <aside className="fulfillment-aside">
-          <Panel title="Allocation decision" description="Review before reserving inventory.">
+          <Panel title={canManage ? 'Allocation decision' : 'Allocation status'} description={canManage ? 'Review before reserving inventory.' : 'Finance owns inventory reservation and allocation changes.'}>
             <dl className="allocation-summary">
               <div><dt>Warehouses used</dt><dd>{shipments.filter((item) => !item.backorder).length}</dd></div>
               <div><dt>Available now</dt><dd>{backordered ? `${backordered} short` : '100%'}</dd></div>
               <div><dt>Delivery promise</dt><dd><span className="text-success">Protected</span></dd></div>
               <div><dt>Quote status</dt><dd><StatusBadge status={quote.stage} /></dd></div>
             </dl>
-            <button className={`button button--full ${accepted ? 'button--success' : 'button--primary'}`} type="button" onClick={acceptSplit} disabled={accepted}>
-              {accepted ? <><Check size={16} /> Split accepted</> : <>Accept suggested split <ArrowRight size={15} /></>}
-            </button>
-            <button className="button button--quiet button--full" type="button" onClick={() => setManual((value) => !value)}>
-              <Settings2 size={15} /> {manual ? 'Use recommendation' : 'Manual override'}
-            </button>
+            {canManage ? (
+              <>
+                <button className={`button button--full ${accepted ? 'button--success' : 'button--primary'}`} type="button" onClick={acceptSplit} disabled={accepted}>
+                  {accepted ? <><Check size={16} /> Split accepted</> : <>Accept suggested split <ArrowRight size={15} /></>}
+                </button>
+                <button className="button button--quiet button--full" type="button" onClick={() => setManual((value) => !value)}>
+                  <Settings2 size={15} /> {manual ? 'Use recommendation' : 'Manual override'}
+                </button>
+              </>
+            ) : (
+              <p className="empty-copy">This view is read-only for sales representatives.</p>
+            )}
           </Panel>
 
           <Panel title="Warehouse capacity" description="Current utilization across configured locations.">

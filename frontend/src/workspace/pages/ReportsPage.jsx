@@ -1,6 +1,5 @@
 import {
   CalendarDays,
-  Download,
   FileDown,
   FileSpreadsheet,
   Filter,
@@ -25,9 +24,10 @@ import { reportRows } from '../seed.js'
 import { PageHeader, Panel, StatCard } from '../components/Ui.jsx'
 
 const tooltipStyle = {
-  background: '#111a2b',
-  border: '1px solid rgba(174,196,230,.16)',
+  background: 'var(--ws-panel)',
+  border: '1px solid var(--ws-line)',
   borderRadius: 10,
+  color: 'var(--ws-text)',
   fontSize: 11,
 }
 
@@ -49,17 +49,27 @@ function xmlEscape(value) {
 }
 
 export default function ReportsPage() {
-  const [filters, setFilters] = useState({ period: '6_MONTHS', team: 'ALL', status: 'ALL', category: 'ALL' })
-  const totals = useMemo(() => reportRows.reduce((summary, row) => ({
+  const [period, setPeriod] = useState('6_MONTHS')
+  const visibleRows = useMemo(
+    () => period === '3_MONTHS' ? reportRows.slice(-3) : reportRows,
+    [period],
+  )
+  const totals = useMemo(() => visibleRows.reduce((summary, row) => ({
     quotations: summary.quotations + row.quotations,
     won: summary.won + row.won,
     revenue: summary.revenue + row.revenue,
     margin: summary.margin + row.margin,
-  }), { quotations: 0, won: 0, revenue: 0, margin: 0 }), [])
-
-  function updateFilter(event) {
-    setFilters((current) => ({ ...current, [event.target.name]: event.target.value }))
-  }
+  }), { quotations: 0, won: 0, revenue: 0, margin: 0 }), [visibleRows])
+  const currentDate = new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date())
+  const firstRevenue = visibleRows[0]?.revenue ?? 0
+  const lastRevenue = visibleRows.at(-1)?.revenue ?? 0
+  const revenueChange = firstRevenue
+    ? ((lastRevenue - firstRevenue) / firstRevenue) * 100
+    : 0
 
   async function exportPdf() {
     const { jsPDF } = await import('jspdf')
@@ -70,12 +80,12 @@ export default function ReportsPage() {
     doc.setFontSize(20)
     doc.text('DealFlow360 Sales Performance', 14, 18)
     doc.setFontSize(9)
-    doc.text('Generated 5 September 2026 · Currency INR', 14, 27)
+    doc.text(`Generated ${currentDate} · Currency INR`, 14, 27)
     doc.setTextColor(26, 36, 52)
     doc.setFontSize(11)
     doc.text(`Quoted revenue: ${formatMoney(totals.revenue)}`, 14, 48)
     doc.text(`Win rate: ${((totals.won / totals.quotations) * 100).toFixed(1)}%`, 14, 56)
-    doc.text(`Average margin: ${(totals.margin / reportRows.length).toFixed(1)}%`, 14, 64)
+    doc.text(`Average margin: ${(totals.margin / visibleRows.length).toFixed(1)}%`, 14, 64)
     doc.setFontSize(9)
     let y = 82
     doc.setFont('helvetica', 'bold')
@@ -86,7 +96,7 @@ export default function ReportsPage() {
     doc.text('Avg discount', 145, y)
     doc.text('Margin', 180, y)
     doc.setFont('helvetica', 'normal')
-    reportRows.forEach((row) => {
+    visibleRows.forEach((row) => {
       y += 10
       doc.text(row.month, 14, y)
       doc.text(String(row.quotations), 52, y)
@@ -101,7 +111,7 @@ export default function ReportsPage() {
 
   function exportXls() {
     const headers = ['Period', 'Quotations', 'Won', 'Revenue INR', 'Average Discount', 'Margin']
-    const rows = reportRows.map((row) => [row.month, row.quotations, row.won, row.revenue, row.avgDiscount, row.margin])
+    const rows = visibleRows.map((row) => [row.month, row.quotations, row.won, row.revenue, row.avgDiscount, row.margin])
     const tableRows = [headers, ...rows]
       .map((row) => `<Row>${row.map((cell) => `<Cell><Data ss:Type="${typeof cell === 'number' ? 'Number' : 'String'}">${xmlEscape(cell)}</Data></Cell>`).join('')}</Row>`)
       .join('')
@@ -119,26 +129,22 @@ export default function ReportsPage() {
         actions={<><button className="button button--quiet" type="button" onClick={exportPdf}><FileDown size={15} /> Export PDF</button><button className="button button--primary" type="button" onClick={exportXls}><FileSpreadsheet size={15} /> Export XLS</button></>}
       />
 
-      <section className="report-filters">
+      <section className="report-filters report-filters--compact">
         <span><Filter size={16} /> Report filters</span>
-        <label><small>Period</small><select name="period" value={filters.period} onChange={updateFilter}><option value="TODAY">Today</option><option value="WEEK">This week</option><option value="6_MONTHS">Last 6 months</option><option value="CUSTOM">Custom range</option></select></label>
-        <label><small>Sales team / rep</small><select name="team" value={filters.team} onChange={updateFilter}><option value="ALL">All sales teams</option><option value="ENTERPRISE">Enterprise sales</option><option value="MID_MARKET">Mid-market</option><option value="AANYA">Aanya Patel</option></select></label>
-        <label><small>Approval status</small><select name="status" value={filters.status} onChange={updateFilter}><option value="ALL">All statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select></label>
-        <label><small>Product / category</small><select name="category" value={filters.category} onChange={updateFilter}><option value="ALL">All categories</option><option>Hardware</option><option>Services</option><option>Subscriptions</option></select></label>
-        <button className="button button--secondary" type="button" onClick={() => toast.success('Report filters applied')}><Download size={14} /> Apply</button>
+        <label><small>Period</small><select name="period" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="3_MONTHS">Last 3 months</option><option value="6_MONTHS">Last 6 months</option></select></label>
       </section>
 
       <section className="stats-grid stats-grid--three">
-        <StatCard icon={TrendingUp} label="Quoted revenue" value={formatMoney(totals.revenue, true)} detail="+18.2% over prior period" tone="blue" />
+        <StatCard icon={TrendingUp} label="Quoted revenue" value={formatMoney(totals.revenue, true)} detail={`${revenueChange >= 0 ? '+' : ''}${revenueChange.toFixed(1)}% from first to latest month`} tone="blue" />
         <StatCard icon={CalendarDays} label="Win rate" value={`${((totals.won / totals.quotations) * 100).toFixed(1)}%`} detail={`${totals.won} of ${totals.quotations} quotations won`} tone="green" />
-        <StatCard icon={FileSpreadsheet} label="Average margin" value={`${(totals.margin / reportRows.length).toFixed(1)}%`} detail="2.6 points above target" tone="violet" />
+        <StatCard icon={FileSpreadsheet} label="Average margin" value={`${(totals.margin / visibleRows.length).toFixed(1)}%`} detail={`Across ${visibleRows.length} reporting months`} tone="violet" />
       </section>
 
       <section className="reports-chart-grid">
         <Panel title="Revenue and wins" description="Monthly quoted revenue with won-deal count.">
           <div className="report-chart">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={reportRows} margin={{ top: 12, right: 10, left: -12, bottom: 0 }}>
+              <BarChart data={visibleRows} margin={{ top: 12, right: 10, left: -12, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke="rgba(174,196,230,.09)" />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#71829d', fontSize: 10 }} />
                 <YAxis tickLine={false} axisLine={false} tick={{ fill: '#71829d', fontSize: 10 }} tickFormatter={(value) => `${value / 1000000}m`} />
@@ -154,7 +160,7 @@ export default function ReportsPage() {
         <Panel title="Pricing discipline" description="Discount and gross margin movement.">
           <div className="report-chart">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={reportRows} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}>
+              <LineChart data={visibleRows} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke="rgba(174,196,230,.09)" />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#71829d', fontSize: 10 }} />
                 <YAxis tickLine={false} axisLine={false} tick={{ fill: '#71829d', fontSize: 10 }} />
@@ -170,7 +176,7 @@ export default function ReportsPage() {
 
       <Panel title="Performance detail" description="The active filters are applied to every metric and export.">
         <div className="data-table-wrap data-table-wrap--nested">
-          <table className="data-table"><thead><tr><th>Period</th><th>Quotations</th><th>Won</th><th>Conversion</th><th>Revenue</th><th>Avg. discount</th><th>Margin</th></tr></thead><tbody>{reportRows.map((row) => <tr key={row.month}><td><strong>{row.month}</strong></td><td>{row.quotations}</td><td>{row.won}</td><td>{((row.won / row.quotations) * 100).toFixed(1)}%</td><td><strong>{formatMoney(row.revenue)}</strong></td><td>{row.avgDiscount}%</td><td><span className="text-success">{row.margin}%</span></td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Period</th><th>Quotations</th><th>Won</th><th>Conversion</th><th>Revenue</th><th>Avg. discount</th><th>Margin</th></tr></thead><tbody>{visibleRows.map((row) => <tr key={row.month}><td><strong>{row.month}</strong></td><td>{row.quotations}</td><td>{row.won}</td><td>{((row.won / row.quotations) * 100).toFixed(1)}%</td><td><strong>{formatMoney(row.revenue)}</strong></td><td>{row.avgDiscount}%</td><td><span className="text-success">{row.margin}%</span></td></tr>)}</tbody></table>
         </div>
       </Panel>
     </div>

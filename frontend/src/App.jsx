@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Moon, Sun } from 'lucide-react'
 import { authApi } from './api/authApi.js'
 import {
   getRoleLabel,
@@ -21,6 +22,34 @@ const emptyRegistration = {
   confirmPassword: '',
   requestedRole: USER_ROLES.SALES_REP,
   acceptTerms: false,
+}
+const THEME_STORAGE_KEY = 'dealflow.theme'
+
+function readInitialTheme() {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark'
+      ? 'dark'
+      : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  const dark = theme === 'dark'
+
+  return (
+    <button
+      className="auth-theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}
+      title={`Switch to ${dark ? 'light' : 'dark'} mode`}
+    >
+      {dark ? <Sun size={16} /> : <Moon size={16} />}
+      <span>{dark ? 'Light' : 'Dark'}</span>
+    </button>
+  )
 }
 
 function BrandMark() {
@@ -109,29 +138,6 @@ function AuthAside({ mode, state }) {
         <div className="illustration-wrap">
           <div className="illustration-glow" />
           <img src={illustration} alt="" />
-
-          <div className="floating-card floating-card--risk">
-            <span className="floating-card__label">Blended risk</span>
-            <strong>High · 72</strong>
-            <span className="risk-line">
-              <i />
-            </span>
-          </div>
-
-          <div className="floating-card floating-card--approval">
-            <span className="approval-avatar">MS</span>
-            <span>
-              <small>Next approval</small>
-              <strong>Sales manager</strong>
-            </span>
-            <span className="approval-state">Pending</span>
-          </div>
-        </div>
-
-        <div className="aside-points">
-          <span>Live margin intelligence</span>
-          <span>Policy-led approvals</span>
-          <span>Complete audit trail</span>
         </div>
       </div>
     </aside>
@@ -267,7 +273,7 @@ function PasswordResetRequested({ email, message, onBack }) {
   )
 }
 
-function InternalAuth() {
+function InternalAuth({ theme, onThemeToggle }) {
   const [mode, setMode] = useState('login')
   const [loginForm, setLoginForm] = useState(emptyLogin)
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration)
@@ -434,7 +440,14 @@ function InternalAuth() {
   }
 
   if (sessionUser) {
-    return <WorkspaceApp user={sessionUser} onLogout={handleLogout} />
+    return (
+      <WorkspaceApp
+        user={sessionUser}
+        onLogout={handleLogout}
+        theme={theme}
+        onThemeToggle={onThemeToggle}
+      />
+    )
   }
 
   return (
@@ -442,11 +455,14 @@ function InternalAuth() {
       <section className="auth-shell">
         <div className="auth-main">
           <header className="brand">
-            <BrandMark />
-            <span className="brand-copy">
-              <strong>DealFlow</strong>
-              <small>Sales operations</small>
+            <span className="brand-identity">
+              <BrandMark />
+              <span className="brand-copy">
+                <strong>DealFlow</strong>
+                <small>Sales operations</small>
+              </span>
             </span>
+            <ThemeToggle theme={theme} onToggle={onThemeToggle} />
           </header>
 
           <div className="form-stage">
@@ -720,10 +736,26 @@ function InternalAuth() {
 }
 
 function App() {
+  const [theme, setTheme] = useState(readInitialTheme)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch {
+      // The selected theme remains active for this session if storage is unavailable.
+    }
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'))
+  }
+
   return window.location.pathname.startsWith('/portal') ? (
-    <CustomerPortal />
+    <CustomerPortal theme={theme} onThemeToggle={toggleTheme} />
   ) : (
-    <InternalAuth />
+    <InternalAuth theme={theme} onThemeToggle={toggleTheme} />
   )
 }
 

@@ -1,4 +1,4 @@
-import { Filter, LayoutGrid, List, Plus, Search, SlidersHorizontal } from 'lucide-react'
+import { Filter, LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { calculateQuote, formatMoney } from '../dealMath.js'
@@ -61,9 +61,6 @@ export default function QuotationsPage() {
             ))}
           </select>
         </label>
-        <button className="button button--quiet" type="button">
-          <SlidersHorizontal size={15} /> More filters
-        </button>
         <div className="view-toggle" aria-label="Quotation view">
           <button type="button" className={view === 'table' ? 'active' : ''} onClick={() => setView('table')} aria-label="Table view"><List size={16} /></button>
           <button type="button" className={view === 'cards' ? 'active' : ''} onClick={() => setView('cards')} aria-label="Card view"><LayoutGrid size={16} /></button>
@@ -121,4 +118,3 @@ export default function QuotationsPage() {
     </div>
   )
 }
-
