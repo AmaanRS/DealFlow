@@ -45,7 +45,8 @@ export const config = Object.freeze({
   mongodbUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/dealflow',
   publicAppUrl: process.env.PUBLIC_APP_URL || 'http://localhost:9080',
   allowedOrigins: csv(
-    process.env.ALLOWED_ORIGINS || 'http://localhost:9080,http://localhost:5174',
+    process.env.ALLOWED_ORIGINS ||
+      'http://localhost:9080,http://127.0.0.1:9080,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174',
   ),
   sessionPepper: process.env.SESSION_PEPPER || defaultPepper,
   secureCookies: nodeEnv === 'production',

@@ -2,7 +2,9 @@
   "name": "dockerize-app-test",
   "private": true,
   "workspaces": [
+    "backend",
     "emails",
+    "frontend",
     "observability"
   ],
   "dependencies": {

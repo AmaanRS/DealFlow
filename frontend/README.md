@@ -8,7 +8,8 @@ customer quotation portal.
 From the repository root:
 
 ```bash
-docker compose -f docker-compose.auth.yaml up --build
+cp backend/.env.example backend/.env
+docker compose up --build
 ```
 
 Open `http://localhost:9080`. Apache APISIX serves the frontend and proxies

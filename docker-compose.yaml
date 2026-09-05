@@ -1,4 +1,73 @@
 services:
+  mongodb:
+    # MongoDB 8 currently refuses to start on Docker's Linux 6.19 VM kernel.
+    # MongoDB 7 is sufficient for local development and remains portable.
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - dealflow-mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    networks:
+      - dealflow
+
+  auth-api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    expose:
+      - "4000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    networks:
+      - dealflow
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_USE_MOCK_AUTH: "false"
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - dealflow
+
+  apisix:
+    image: apache/apisix:${APISIX_IMAGE_TAG:-3.17.0-debian}
+    restart: unless-stopped
+    depends_on:
+      auth-api:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      APISIX_STAND_ALONE: "true"
+    volumes:
+      - ./infrastructure/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./infrastructure/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    ports:
+      - "9080:9080"
+    networks:
+      - dealflow
+
   otel-collector:
     build:
       context: ./otel_collector
@@ -73,9 +142,11 @@ services:
       - observability
 
 networks:
+  dealflow:
   observability:
 
 volumes:
+  dealflow-mongodb:
   redis-data:
   loki-data:
   grafana-data:
