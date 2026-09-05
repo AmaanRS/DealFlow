@@ -1,0 +1,37 @@
+{
+  "login": {
+    "file": "login.svg",
+    "source": "https://cdn.undraw.co/illustrations/secure-login_m11a.svg",
+    "accentSwaps": 3,
+    "viewBox": "0 0 793 551.73152",
+    "bytes": 6610
+  },
+  "signup": {
+    "file": "signup.svg",
+    "source": "https://cdn.undraw.co/illustration/access-account_aydp.svg",
+    "accentSwaps": 10,
+    "viewBox": "0 0 720 722.539",
+    "bytes": 8230
+  },
+  "verify": {
+    "file": "verify.svg",
+    "source": "https://cdn.undraw.co/illustration/two-factor-authentication_ofho.svg",
+    "accentSwaps": 9,
+    "viewBox": "0 0 800 490.473",
+    "bytes": 10514
+  },
+  "forgot": {
+    "file": "forgot.svg",
+    "source": "https://cdn.undraw.co/illustration/forgot-password_nttj.svg",
+    "accentSwaps": 9,
+    "viewBox": "0 0 800.314 644.708",
+    "bytes": 4749
+  },
+  "reset": {
+    "file": "reset.svg",
+    "source": "https://cdn.undraw.co/illustration/enter-password_1kl4.svg",
+    "accentSwaps": 9,
+    "viewBox": "0 0 818.55304 686.94758",
+    "bytes": 6034
+  }
+}

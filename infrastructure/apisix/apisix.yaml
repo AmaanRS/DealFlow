@@ -1,0 +1,65 @@
+routes:
+  - id: sensitive-api-gateway
+    name: Sensitive API gateway endpoints
+    uris:
+      - /api/v1/auth/login
+      - /api/v1/auth/registrations
+      - /api/v1/portal/session
+    priority: 100
+    plugins:
+      request-id:
+        header_name: X-Request-Id
+        include_in_response: true
+        algorithm: uuid
+      cors:
+        allow_origins: http://localhost:9080,http://localhost:5174
+        allow_methods: GET,POST,OPTIONS
+        allow_headers: Content-Type,X-Request-Id
+        expose_headers: X-Request-Id
+        allow_credential: true
+        max_age: 3600
+      limit-req:
+        rate: 5
+        burst: 5
+        key: remote_addr
+        rejected_code: 429
+        rejected_msg: '{"code":"RATE_LIMITED","message":"Too many authentication attempts. Try again shortly."}'
+    upstream:
+      type: roundrobin
+      pass_host: node
+      nodes:
+        api-gateway:4000: 1
+
+  - id: api-gateway
+    name: DealFlow API gateway
+    uri: /api/*
+    priority: 10
+    plugins:
+      request-id:
+        header_name: X-Request-Id
+        include_in_response: true
+        algorithm: uuid
+      cors:
+        allow_origins: http://localhost:9080,http://localhost:5174
+        allow_methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+        allow_headers: Content-Type,X-Request-Id
+        expose_headers: X-Request-Id
+        allow_credential: true
+        max_age: 3600
+    upstream:
+      type: roundrobin
+      pass_host: node
+      nodes:
+        api-gateway:4000: 1
+
+  - id: frontend
+    name: DealFlow React application
+    uri: /*
+    priority: 0
+    upstream:
+      type: roundrobin
+      pass_host: node
+      nodes:
+        frontend:80: 1
+
+#END
