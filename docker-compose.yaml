@@ -3,6 +3,10 @@ services:
     build:
       context: ./otel_collector
       dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - loki
+      - tempo
     networks:
       - observability
 
@@ -10,12 +14,69 @@ services:
     build:
       context: .
       dockerfile: emails/Dockerfile
+    restart: unless-stopped
     depends_on:
-      - otel-collector
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
     env_file:
       - ./emails/.env
     networks:
       - observability
 
+  redis:
+    image: redis:7.4.11-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - observability
+
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks:
+      - observability
+
+  tempo:
+    image: grafana/tempo:latest
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - observability
+
+  grafana:
+    build:
+      context: ./grafana
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+      - tempo
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - observability
+
 networks:
   observability:
+
+volumes:
+  redis-data:
+  loki-data:
+  grafana-data:
+  tempo-data:
