@@ -58,6 +58,18 @@ test('POST approve_user is registered as an admin route', () => {
   assert.equal(route.methods.post, true)
 })
 
+test('risk configuration endpoints are registered as admin routes', () => {
+  const configureRoute = adminRoutes.stack.find(
+    (layer) => layer.route?.path === '/configure_risk',
+  )?.route
+  const dataRoute = adminRoutes.stack.find(
+    (layer) => layer.route?.path === '/risks_data',
+  )?.route
+
+  assert.equal(configureRoute?.methods.post, true)
+  assert.equal(dataRoute?.methods.get, true)
+})
+
 test('approval activates the user and persists is_verified true', async () => {
   const { observed, dependencies } = reviewDependencies({
     is_deleted: false,

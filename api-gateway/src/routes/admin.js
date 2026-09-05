@@ -4,7 +4,15 @@ import { z } from 'zod'
 import { USER_ROLES, USER_STATUSES } from '../constants.js'
 import { asyncRoute, parseBody } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
-import { AuditEvent, CategoryDiscount, TierDiscount, User } from '../models.js'
+import {
+  AuditEvent,
+  CategoryDiscount,
+  RISK_CONFIGURATION_ID,
+  RiskConfiguration,
+  TierDiscount,
+  User,
+  effectiveRiskThresholds,
+} from '../models.js'
 import { publicRegistration } from '../security.js'
 import {
   logger,
@@ -27,6 +35,20 @@ const createCategoryDiscountSchema = z.object({
   subscription: z.literal(0).optional().default(0),
 }).strict()
 
+const configureRiskSchema = z
+  .object({
+    medium_risk_threshold: z.number().min(0).max(100),
+    high_risk_threshold: z.number().min(0).max(100),
+  })
+  .strict()
+  .refine(
+    (body) => body.medium_risk_threshold < body.high_risk_threshold,
+    {
+      path: ['high_risk_threshold'],
+      message: 'Must be greater than medium_risk_threshold.',
+    },
+  )
+
 function publicTierDiscount(discount) {
   return {
     id: String(discount._id),
@@ -45,6 +67,24 @@ function publicCategoryDiscount(discount) {
     subscription: discount.subscription,
     createdAt: discount.createdAt,
     updatedAt: discount.updatedAt,
+  }
+}
+
+export function publicRiskData(configuration) {
+  const thresholds = effectiveRiskThresholds(configuration)
+
+  return {
+    configured: Boolean(configuration),
+    ...thresholds,
+    line_item_rule: {
+      condition: 'applied_discount > product_discount',
+      minimum_risk: 'MEDIUM',
+      configurable: false,
+    },
+    updated_by: configuration?.updated_by
+      ? String(configuration.updated_by)
+      : null,
+    updatedAt: configuration?.updatedAt ?? null,
   }
 }
 
@@ -168,6 +208,67 @@ router.post(
     res.status(201).json({
       category_discount: publicCategoryDiscount(discount),
     })
+  }),
+)
+
+router.post(
+  '/configure_risk',
+  requireRoles(USER_ROLES.ADMIN),
+  asyncRoute(async (req, res) => {
+    const body = parseBody(configureRiskSchema, req, res)
+    if (!body) return
+
+    const configuration = await RiskConfiguration.findOneAndUpdate(
+      { _id: RISK_CONFIGURATION_ID },
+      {
+        $set: {
+          ...body,
+          updated_by: req.auth.user._id,
+        },
+      },
+      {
+        upsert: true,
+        returnDocument: 'after',
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      },
+    )
+
+    await AuditEvent.create({
+      eventType: 'QUOTE_RISK_CONFIGURED',
+      actorUserId: req.auth.user._id,
+      metadata: {
+        mediumRiskThreshold: configuration.medium_risk_threshold,
+        highRiskThreshold: configuration.high_risk_threshold,
+      },
+    })
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'risk.medium_threshold': configuration.medium_risk_threshold,
+      'risk.high_threshold': configuration.high_risk_threshold,
+    })
+    logger.info(
+      'Quote risk thresholds configured',
+      requestLogContext(req, {
+        'event.name': 'admin.quote_risk.configured',
+        'event.outcome': 'success',
+      }),
+    )
+
+    res.json({ risk_data: publicRiskData(configuration) })
+  }),
+)
+
+router.get(
+  '/risks_data',
+  requireRoles(USER_ROLES.ADMIN),
+  asyncRoute(async (_req, res) => {
+    const configuration = await RiskConfiguration.findById(
+      RISK_CONFIGURATION_ID,
+    ).lean()
+
+    res.json({ risk_data: publicRiskData(configuration) })
   }),
 )
 

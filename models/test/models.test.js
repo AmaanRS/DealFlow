@@ -12,6 +12,7 @@ import {
   PortalInvitation,
   Quote,
   QuoteRevisionHistory,
+  RiskConfiguration,
   Session,
   Store,
   SubscriptionDetails,
@@ -105,6 +106,7 @@ test('every shared model keeps its established MongoDB collection name', () => {
     [Item, 'items'],
     [Quote, 'quotes'],
     [QuoteRevisionHistory, 'quote_revision_history'],
+    [RiskConfiguration, 'risk_configurations'],
     [SubscriptionDetails, 'subscription_details'],
     [SubscriptionRevisionHistory, 'subscription_revision_history'],
     [Billing, 'billing'],
@@ -113,6 +115,26 @@ test('every shared model keeps its established MongoDB collection name', () => {
   for (const [Model, collectionName] of expectedCollections) {
     assert.equal(Model.collection.collectionName, collectionName, Model.modelName)
   }
+})
+
+test('risk configuration defaults to 25/50 and requires ordered thresholds', async () => {
+  const configuration = new RiskConfiguration()
+
+  await configuration.validate()
+
+  assert.equal(configuration._id, 'quote-risk')
+  assert.equal(configuration.medium_risk_threshold, 25)
+  assert.equal(configuration.high_risk_threshold, 50)
+
+  await assert.rejects(
+    new RiskConfiguration({
+      medium_risk_threshold: 50,
+      high_risk_threshold: 25,
+    }).validate(),
+    (error) =>
+      error.errors.high_risk_threshold?.message ===
+      'high_risk_threshold must be greater than medium_risk_threshold',
+  )
 })
 
 test('quote models preserve references, workflow enums, and UUID defaults', () => {

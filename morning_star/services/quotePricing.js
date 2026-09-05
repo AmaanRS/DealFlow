@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 import { User } from "@app/models/auth";
 import { Article, Hsn, Item } from "@app/models/catalog";
 import { CategoryDiscount, TierDiscount } from "@app/models/discounts";
+import {
+  RISK_CONFIGURATION_ID,
+  RiskConfiguration,
+  effectiveRiskThresholds,
+} from "@app/models/risk";
 
 export const QUOTE_INPUT_FIELDS = Object.freeze([
   "customer",
@@ -12,7 +17,6 @@ export const QUOTE_INPUT_FIELDS = Object.freeze([
   "assigned_to",
   "status",
   "reason",
-  "risk",
   "subscription_details",
 ]);
 
@@ -102,6 +106,52 @@ function roundMoney(value) {
 
 function applyDiscount(amount, discount) {
   return amount * (1 - discount / 100);
+}
+
+export function calculateQuoteRisk({
+  products,
+  costPrice,
+  discountedPrice,
+  mediumRiskThreshold,
+  highRiskThreshold,
+}) {
+  if (
+    !Number.isFinite(mediumRiskThreshold) ||
+    !Number.isFinite(highRiskThreshold) ||
+    mediumRiskThreshold < 0 ||
+    highRiskThreshold > 100 ||
+    mediumRiskThreshold >= highRiskThreshold
+  ) {
+    throw pricingError(
+      409,
+      "INVALID_RISK_CONFIGURATION",
+      "Risk thresholds must satisfy 0 <= medium < high <= 100",
+    );
+  }
+
+  const lineItemRuleTriggered = products.some(
+    (product) => product.applied_discount > product.product_discount,
+  );
+  const discountPercentage =
+    costPrice > 0
+      ? Math.max(0, ((costPrice - discountedPrice) / costPrice) * 100)
+      : 0;
+
+  let risk = "LOW";
+  if (discountPercentage > highRiskThreshold) {
+    risk = "HIGH";
+  } else if (
+    lineItemRuleTriggered ||
+    discountPercentage > mediumRiskThreshold
+  ) {
+    risk = "MEDIUM";
+  }
+
+  return {
+    risk,
+    discount_percentage: Math.round(discountPercentage * 100) / 100,
+    line_item_rule_triggered: lineItemRuleTriggered,
+  };
 }
 
 function normalizeProductInputs(products) {
@@ -215,17 +265,19 @@ export async function priceQuotation(input) {
   const productInputs = normalizeProductInputs(input.products);
   const orderDiscount = percentage(input.order_discount, "order_discount");
 
-  const [customer, articles, categoryDiscount] = await Promise.all([
-    User.findOne({ _id: input.customer, is_deleted: { $ne: true } })
-      .select("role requestedRole _custom_json.tier")
-      .lean(),
-    Article.find({
-      _id: { $in: productInputs.map((product) => product.article_id) },
-    })
-      .select("item_id seller_identifier price inventory store_id discount")
-      .lean(),
-    CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
-  ]);
+  const [customer, articles, categoryDiscount, riskConfiguration] =
+    await Promise.all([
+      User.findOne({ _id: input.customer, is_deleted: { $ne: true } })
+        .select("role requestedRole _custom_json.tier")
+        .lean(),
+      Article.find({
+        _id: { $in: productInputs.map((product) => product.article_id) },
+      })
+        .select("item_id seller_identifier price inventory store_id discount")
+        .lean(),
+      CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
+      RiskConfiguration.findById(RISK_CONFIGURATION_ID).lean(),
+    ]);
 
   if (!customer) {
     throw pricingError(
@@ -404,14 +456,27 @@ export async function priceQuotation(input) {
     };
   });
 
+  const roundedCostPrice = roundMoney(costPrice);
+  const roundedDiscountedPrice = roundMoney(discountedPrice);
+  const roundedSellingPrice = roundMoney(sellingPrice);
+  const thresholds = effectiveRiskThresholds(riskConfiguration);
+  const { risk } = calculateQuoteRisk({
+    products,
+    costPrice: roundedCostPrice,
+    discountedPrice: roundedDiscountedPrice,
+    mediumRiskThreshold: thresholds.medium_risk_threshold,
+    highRiskThreshold: thresholds.high_risk_threshold,
+  });
+
   return {
     ...input,
     products,
     order_discount: orderDiscount,
     tier_discount: effectiveTierDiscount,
-    cost_price: roundMoney(costPrice),
-    discounted_price: roundMoney(discountedPrice),
-    selling_price: roundMoney(sellingPrice),
+    cost_price: roundedCostPrice,
+    discounted_price: roundedDiscountedPrice,
+    selling_price: roundedSellingPrice,
+    risk,
     fulfillment_details: fulfillmentDetails,
   };
 }
@@ -431,7 +496,6 @@ export function quoteIntentFromSnapshot(quote) {
     assigned_to: quote.assigned_to,
     status: quote.status,
     reason: quote.reason,
-    risk: quote.risk,
     subscription_details: (quote.subscription_details ?? []).map((subscription) =>
       String(subscription?._id ?? subscription),
     ),

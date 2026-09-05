@@ -12,7 +12,8 @@
     "./catalog": "./catalog.js",
     "./constants": "./constants.js",
     "./discounts": "./discounts.js",
-    "./quotes": "./quotes.js"
+    "./quotes": "./quotes.js",
+    "./risk": "./risk.js"
   },
   "peerDependencies": {
     "mongoose": "^9.9.5"

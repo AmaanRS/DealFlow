@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import mongoose from 'mongoose'
 import { User } from './auth.js'
 import { Article, Hsn, Item, Store } from './catalog.js'
+import { RiskConfiguration } from './risk.js'
 import {
   AUTO_APPROVER,
   ITEM_CATEGORIES,
@@ -409,6 +410,7 @@ export const Billing =
   mongoose.models.Billing ?? mongoose.model('Billing', billingSchema)
 
 const quoteModels = [
+  RiskConfiguration,
   Quote,
   QuoteRevisionHistory,
   SubscriptionDetails,
