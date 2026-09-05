@@ -3,15 +3,19 @@ import mongoose from "mongoose";
 import { logger } from "@app/observability";
 import { config } from "./convict.js";
 import { initializeCollections } from "./models.js";
+import categoryRoutes from "./routes/category.js";
 import productRoutes from "./routes/product.js";
 import storeRoutes from "./routes/store.js";
+import tierRoutes from "./routes/tier.js";
 
 const app = express();
 const port = config.get("port");
 
 app.use(express.json({ limit: "64kb" }));
+app.use("/category", categoryRoutes);
 app.use("/product", productRoutes);
 app.use("/store", storeRoutes);
+app.use("/tier", tierRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
