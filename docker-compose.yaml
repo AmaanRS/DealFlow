@@ -1,13 +1,12 @@
 services:
   mongodb:
-    # MongoDB 8 currently refuses to start on Docker's Linux 6.19 VM kernel.
-    # MongoDB 7 is sufficient for local development and remains portable.
     image: mongo:7.0
     restart: unless-stopped
     volumes:
       - dealflow-mongodb:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test:
+        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 5s
       timeout: 4s
       retries: 20
@@ -31,7 +30,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 4s
@@ -102,6 +101,22 @@ services:
       - ./emails/.env
     networks:
       - observability
+
+  night_sky:
+    build:
+      context: .
+      dockerfile: night_sky/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    env_file:
+      - ./night_sky/.env
+    networks:
+      - observability
+      - dealflow
 
   redis:
     image: redis:7.4.11-alpine
