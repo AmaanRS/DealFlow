@@ -426,7 +426,7 @@ export async function priceQuotation(input) {
     sellingPrice += lineDiscountedPrice * (1 + gst / 100);
 
     if (category !== "SUBSCRIPTION") {
-      if (!Number.isInteger(article.store_id) || article.store_id < 1) {
+      if (!mongoose.isObjectIdOrHexString(article.store_id)) {
         throw pricingError(
           409,
           "INVALID_ARTICLE_STORE",

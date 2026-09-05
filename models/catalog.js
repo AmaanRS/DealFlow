@@ -71,15 +71,6 @@ hsnSchema.index(
 
 const storeSchema = new Schema(
   {
-    _id: {
-      type: Number,
-      required: true,
-      min: 1,
-      validate: {
-        validator: Number.isInteger,
-        message: '_id must be an integer',
-      },
-    },
     name: {
       type: String,
       required: true,
@@ -131,7 +122,11 @@ const articleSchema = new Schema(
       type: inventorySchema,
       default: () => ({}),
     },
-    store_id: nonNegativeInteger(),
+    store_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Store',
+      default: null,
+    },
     discount: percentage(),
     restock_point: nonNegativeInteger(),
   },
@@ -196,14 +191,34 @@ articleSchema.pre('validate', async function enforceSubscriptionArticle() {
     return
   }
 
-  if (!item.categories.includes('SUBSCRIPTION')) return
+  if (item.categories.includes('SUBSCRIPTION')) {
+    if (this.store_id !== null && this.store_id !== undefined) {
+      this.invalidate(
+        'store_id',
+        'store_id must be null for a SUBSCRIPTION item',
+      )
+    }
 
-  if (this.store_id !== 0) {
-    this.invalidate('store_id', 'store_id must be 0 for a SUBSCRIPTION item')
+    if (this.discount !== 0) {
+      this.invalidate('discount', 'discount must be 0 for a SUBSCRIPTION item')
+    }
+    return
   }
 
-  if (this.discount !== 0) {
-    this.invalidate('discount', 'discount must be 0 for a SUBSCRIPTION item')
+  if (!this.store_id) {
+    this.invalidate(
+      'store_id',
+      'store_id is required for a non-subscription item',
+    )
+    return
+  }
+
+  const storeExists = await this.constructor.db
+    .model('Store')
+    .exists({ _id: this.store_id })
+
+  if (!storeExists) {
+    this.invalidate('store_id', 'store_id must reference an existing store')
   }
 })
 
@@ -217,13 +232,13 @@ itemSchema.pre('validate', async function enforceExistingArticles() {
 
   const conflictingArticle = await this.constructor.db.model('Article').exists({
     _id: { $in: this.all_identifiers },
-    $or: [{ store_id: { $ne: 0 } }, { discount: { $ne: 0 } }],
+    $or: [{ store_id: { $ne: null } }, { discount: { $ne: 0 } }],
   })
 
   if (conflictingArticle) {
     this.invalidate(
       'all_identifiers',
-      'all articles for a SUBSCRIPTION item must have store_id and discount set to 0',
+      'all articles for a SUBSCRIPTION item must have store_id set to null and discount set to 0',
     )
   }
 })

@@ -279,6 +279,42 @@ export async function getApprovedQuotes(req, res) {
   await sendQuoteList(res, filter, pagination);
 }
 
+export async function getAtRiskDeals(req, res) {
+  requireDatabase();
+  const pagination = parsePagination(req.query);
+  const filter = parseFilterObject(req.query);
+  const atRiskValues = ["MEDIUM", "HIGH"];
+
+  if (typeof filter.risk === "string") {
+    if (!atRiskValues.includes(filter.risk)) {
+      throw new ApiError(
+        400,
+        "INVALID_FILTER",
+        "at_risk_deals only supports MEDIUM or HIGH risk",
+      );
+    }
+  } else if (filter.risk?.$in) {
+    const requestedRisks = filter.risk.$in.filter((risk) =>
+      atRiskValues.includes(risk),
+    );
+
+    if (requestedRisks.length === 0) {
+      throw new ApiError(
+        400,
+        "INVALID_FILTER",
+        "at_risk_deals only supports MEDIUM or HIGH risk",
+      );
+    }
+
+    filter.risk = { $in: requestedRisks };
+  } else {
+    filter.risk = { $in: atRiskValues };
+  }
+
+  filter.is_latest_quote = true;
+  await sendQuoteList(res, filter, pagination);
+}
+
 export async function getQuote(req, res) {
   requireDatabase();
 

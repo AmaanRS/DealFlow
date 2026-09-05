@@ -69,20 +69,23 @@ export async function getStores(req, res) {
   if (itemIds.length > 0) {
     const articles = await Article.find({
       item_id: { $in: itemIds },
-      store_id: { $gt: 0 },
+      store_id: { $ne: null },
     })
       .select("item_id store_id")
       .lean();
 
     for (const article of articles) {
-      const storeItemIds = itemIdsByStore.get(article.store_id) ?? new Set();
+      const storeId = String(article.store_id);
+      const storeItemIds = itemIdsByStore.get(storeId) ?? new Set();
       storeItemIds.add(String(article.item_id));
-      itemIdsByStore.set(article.store_id, storeItemIds);
+      itemIdsByStore.set(storeId, storeItemIds);
     }
   }
 
   const storeFilter =
-    itemIds.length === 0 ? {} : { _id: { $in: [...itemIdsByStore.keys()] } };
+    itemIds.length === 0
+      ? {}
+      : { _id: { $in: [...itemIdsByStore.keys()] } };
   const { page, limit } = pagination;
   const [stores, total] = await Promise.all([
     Store.find(storeFilter)
@@ -97,7 +100,7 @@ export async function getStores(req, res) {
     stores: stores.map((store) => ({
       ...store,
       ...(itemIds.length > 0
-        ? { item_ids: [...itemIdsByStore.get(store._id)] }
+        ? { item_ids: [...itemIdsByStore.get(String(store._id))] }
         : {}),
     })),
     pagination: {

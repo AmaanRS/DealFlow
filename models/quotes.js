@@ -92,14 +92,9 @@ const fulfillmentDetailSchema = new Schema({
     maxlength: 200,
   },
   store: {
-    type: Number,
+    type: Schema.Types.ObjectId,
     ref: Store.modelName,
     required: true,
-    min: 1,
-    validate: {
-      validator: Number.isInteger,
-      message: 'store must be an integer',
-    },
   },
   inv: positiveInteger(),
 })

@@ -1,6 +1,10 @@
 import mongoose from "mongoose";
 import { logger } from "@app/observability";
-import { appendReportingHsn, Article, Hsn, Item } from "../models.js";
+import { appendReportingHsn, Article, Hsn, Item, Quote } from "../models.js";
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 
 function sendDatabaseUnavailable(res) {
   res.status(503).json({
@@ -15,6 +19,111 @@ function isDatabaseReady() {
 
 function productQuery(itemId) {
   return Item.findById(itemId).populate("all_identifiers").lean();
+}
+
+function parsePositiveInteger(value, fallback, maximum) {
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    (maximum !== undefined && parsed > maximum)
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+export async function getQuoteInventory(req, res) {
+  if (!isDatabaseReady()) {
+    sendDatabaseUnavailable(res);
+    return;
+  }
+
+  const { quote_id: quoteId } = req.params;
+  if (!mongoose.isObjectIdOrHexString(quoteId)) {
+    res.status(400).json({
+      code: "INVALID_QUOTE_ID",
+      message: "quote_id must be a valid MongoDB ObjectId",
+    });
+    return;
+  }
+
+  const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+  const limit = parsePositiveInteger(req.query.limit, DEFAULT_LIMIT, MAX_LIMIT);
+  if (page === null || limit === null) {
+    res.status(400).json({
+      code: "INVALID_PAGINATION",
+      message: "page must be a positive integer and limit must be between 1 and 100",
+    });
+    return;
+  }
+
+  const unsupportedQueryFields = Object.keys(req.query).filter(
+    (field) => !["page", "limit"].includes(field),
+  );
+  if (unsupportedQueryFields.length > 0) {
+    res.status(400).json({
+      code: "INVALID_FILTER",
+      message: `Unsupported query field(s): ${unsupportedQueryFields.join(", ")}`,
+    });
+    return;
+  }
+
+  const quote = await Quote.findById(quoteId)
+    .select("products.article_id products.inv")
+    .lean();
+
+  if (!quote) {
+    res.status(404).json({
+      code: "QUOTE_NOT_FOUND",
+      message: "Quotation not found",
+    });
+    return;
+  }
+
+  const quotedProducts = quote.products ?? [];
+  const total = quotedProducts.length;
+  const selectedProducts = quotedProducts.slice(
+    (page - 1) * limit,
+    page * limit,
+  );
+  const articles = await Article.find({
+    _id: { $in: selectedProducts.map((product) => product.article_id) },
+  })
+    .populate("store_id")
+    .lean();
+  const articleById = new Map(
+    articles.map((article) => [String(article._id), article]),
+  );
+  const missingArticleIds = selectedProducts
+    .filter((product) => !articleById.has(String(product.article_id)))
+    .map((product) => String(product.article_id));
+
+  if (missingArticleIds.length > 0) {
+    res.status(409).json({
+      code: "QUOTE_ARTICLE_NOT_FOUND",
+      message: "One or more quotation articles no longer exist",
+      article_ids: [...new Set(missingArticleIds)],
+    });
+    return;
+  }
+
+  res.json({
+    quote_id: String(quote._id),
+    articles: selectedProducts.map((product) => ({
+      ...articleById.get(String(product.article_id)),
+      inv: product.inv,
+    })),
+    pagination: {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit),
+    },
+  });
 }
 
 export async function getProduct(req, res) {
