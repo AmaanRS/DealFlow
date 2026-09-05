@@ -238,12 +238,17 @@ function normalizeQuoteInput(input) {
 }
 
 export function applyCreationRiskWorkflow(pricedQuotation) {
+  const isDraft = pricedQuotation.status === "DRAFT";
   const isLowRisk = pricedQuotation.risk === "LOW";
+  let status = "PENDING_APPROVAL";
+
+  if (isDraft) status = "DRAFT";
+  else if (isLowRisk) status = "APPROVED";
 
   return normalizeQuoteInput({
     ...pricedQuotation,
-    status: isLowRisk ? "APPROVED" : "PENDING_APPROVAL",
-    approved_by: isLowRisk ? AUTO_APPROVER : null,
+    status,
+    approved_by: !isDraft && isLowRisk ? AUTO_APPROVER : null,
   });
 }
 
