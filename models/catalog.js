@@ -24,6 +24,15 @@ function nonNegativeInteger(defaultValue = 0) {
   }
 }
 
+function percentage(defaultValue = 0) {
+  return {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: defaultValue,
+  }
+}
+
 const reportingHsnSchema = new Schema({
   reporting_hsn: {
     type: String,
@@ -35,6 +44,7 @@ const reportingHsnSchema = new Schema({
     type: Number,
     required: true,
     min: 0,
+    max: 100,
   },
 })
 
@@ -122,7 +132,7 @@ const articleSchema = new Schema(
       default: () => ({}),
     },
     store_id: nonNegativeInteger(),
-    discount: nonNegativeNumber(),
+    discount: percentage(),
     restock_point: nonNegativeInteger(),
   },
   { collection: 'articles', timestamps: true },

@@ -124,6 +124,35 @@ services:
       - observability
       - dealflow
 
+  morning_star:
+    build:
+      context: .
+      dockerfile: morning_star/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    env_file:
+      - ./morning_star/.env
+    expose:
+      - "3002"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    networks:
+      - observability
+      - dealflow
+
   redis:
     image: redis:7.4.11-alpine
     restart: unless-stopped

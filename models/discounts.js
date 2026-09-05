@@ -4,6 +4,7 @@ function nonNegativeNumber(defaultValue = 0) {
   return {
     type: Number,
     min: 0,
+    max: 100,
     default: defaultValue,
   }
 }
@@ -42,6 +43,7 @@ const tierDiscountSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0,
+      max: 100,
       validate: {
         validator: Number.isInteger,
         message: '{PATH} must be an integer',
