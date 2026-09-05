@@ -1,11 +1,15 @@
 import mongoose from "mongoose";
 import { logger } from "@app/observability";
+import { Article } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
+  Billing,
   QUOTE_RISKS,
   QUOTE_STATUSES,
   Quote,
   QuoteRevisionHistory,
+  SubscriptionDetails,
+  SubscriptionRevisionHistory,
 } from "../models.js";
 import {
   QUOTE_INPUT_FIELDS,
@@ -233,6 +237,251 @@ function normalizeQuoteInput(input) {
   return normalized;
 }
 
+export function applyCreationRiskWorkflow(pricedQuotation) {
+  const isLowRisk = pricedQuotation.risk === "LOW";
+
+  return normalizeQuoteInput({
+    ...pricedQuotation,
+    status: isLowRisk ? "APPROVED" : "PENDING_APPROVAL",
+    approved_by: isLowRisk ? AUTO_APPROVER : null,
+  });
+}
+
+async function releaseInventoryReservations(reservations) {
+  await Promise.allSettled(
+    reservations.map(({ article_id: articleId, inv }) =>
+      Article.updateOne(
+        { _id: articleId },
+        {
+          $inc: {
+            "inventory.sellable": inv,
+            "inventory.reserved": -inv,
+          },
+        },
+      ),
+    ),
+  );
+}
+
+async function reserveQuoteInventory(products) {
+  const reservations = [];
+
+  try {
+    for (const product of products) {
+      if (product.category === "SUBSCRIPTION") continue;
+
+      const articleId = product.article_id;
+      const reservedArticle = await Article.findOneAndUpdate(
+        {
+          _id: articleId,
+          "inventory.sellable": { $gte: product.inv },
+        },
+        {
+          $inc: {
+            "inventory.sellable": -product.inv,
+            "inventory.reserved": product.inv,
+          },
+        },
+        { returnDocument: "after" },
+      );
+
+      if (!reservedArticle) {
+        throw new ApiError(
+          409,
+          "INSUFFICIENT_INVENTORY",
+          `Article ${articleId} does not have enough sellable inventory to enter negotiation`,
+          { article_id: String(articleId), requested: product.inv },
+        );
+      }
+
+      reservations.push({ article_id: articleId, inv: product.inv });
+    }
+
+    return reservations;
+  } catch (error) {
+    await releaseInventoryReservations(reservations);
+    throw error;
+  }
+}
+
+function inventoryByArticle(products) {
+  const inventory = new Map();
+
+  for (const product of products) {
+    if (product.category === "SUBSCRIPTION") continue;
+    const articleId = String(product.article_id);
+    inventory.set(articleId, (inventory.get(articleId) ?? 0) + product.inv);
+  }
+
+  return inventory;
+}
+
+async function restoreReleasedInventory(releases) {
+  await Promise.allSettled(
+    releases.map(({ article_id: articleId, inv }) =>
+      Article.updateOne(
+        {
+          _id: articleId,
+          "inventory.sellable": { $gte: inv },
+        },
+        {
+          $inc: {
+            "inventory.sellable": -inv,
+            "inventory.reserved": inv,
+          },
+        },
+      ),
+    ),
+  );
+}
+
+async function releaseQuoteInventory(products) {
+  const releases = [];
+
+  try {
+    for (const [articleId, inv] of inventoryByArticle(products)) {
+      const releasedArticle = await Article.findOneAndUpdate(
+        {
+          _id: articleId,
+          "inventory.reserved": { $gte: inv },
+        },
+        {
+          $inc: {
+            "inventory.sellable": inv,
+            "inventory.reserved": -inv,
+          },
+        },
+        { returnDocument: "after" },
+      );
+
+      if (!releasedArticle) {
+        throw new ApiError(
+          409,
+          "INSUFFICIENT_RESERVED_INVENTORY",
+          `Article ${articleId} does not contain the inventory reserved by this quotation`,
+          { article_id: articleId, expected_reserved: inv },
+        );
+      }
+
+      releases.push({ article_id: articleId, inv });
+    }
+
+    return releases;
+  } catch (error) {
+    await restoreReleasedInventory(releases);
+    throw error;
+  }
+}
+
+async function createSubscriptionRecords(products) {
+  const subscriptions = [];
+  const revisions = [];
+
+  try {
+    for (const product of products) {
+      if (product.category !== "SUBSCRIPTION") continue;
+
+      const subscription = await SubscriptionDetails.create({
+        article_id: product.article_id,
+        status: "ACTIVE",
+        is_latest: true,
+      });
+      subscriptions.push(subscription);
+
+      const revision = await SubscriptionRevisionHistory.create({
+        sub_version: 1,
+        subscription_details_id: subscription._id,
+      });
+      revisions.push(revision);
+    }
+
+    return { subscriptions, revisions };
+  } catch (error) {
+    await Promise.allSettled([
+      SubscriptionRevisionHistory.deleteMany({
+        _id: { $in: revisions.map((revision) => revision._id) },
+      }),
+      SubscriptionDetails.deleteMany({
+        _id: { $in: subscriptions.map((subscription) => subscription._id) },
+      }),
+    ]);
+    throw error;
+  }
+}
+
+async function advanceApprovedSubscriptionQuote(quote) {
+  const subscriptionProducts = quote.products.filter(
+    (product) => product.category === "SUBSCRIPTION",
+  );
+  if (quote.status !== "APPROVED" || subscriptionProducts.length === 0) {
+    return {
+      quote,
+      billing: null,
+      reservations: [],
+      subscriptions: [],
+      subscriptionRevisions: [],
+    };
+  }
+
+  const { subscriptions, revisions: subscriptionRevisions } =
+    await createSubscriptionRecords(subscriptionProducts);
+  let reservations = [];
+  let billing;
+
+  try {
+    const negotiationQuote = await Quote.findOneAndUpdate(
+      { _id: quote._id, status: "APPROVED" },
+      {
+        $set: {
+          status: "NEGOTIATION",
+          subscription_details: subscriptions.map(
+            (subscription) => subscription._id,
+          ),
+        },
+      },
+      { returnDocument: "after", runValidators: true },
+    );
+    if (!negotiationQuote) {
+      throw new ApiError(
+        409,
+        "QUOTE_VERSION_CONFLICT",
+        "The quotation changed while subscriptions were being created",
+      );
+    }
+
+    reservations = await reserveQuoteInventory(negotiationQuote.products);
+    billing = await Billing.create({ quote_id: negotiationQuote._id });
+
+    return {
+      quote: negotiationQuote,
+      billing,
+      reservations,
+      subscriptions,
+      subscriptionRevisions,
+    };
+  } catch (error) {
+    await releaseInventoryReservations(reservations);
+    await Promise.allSettled([
+      billing?._id
+        ? Billing.deleteOne({ _id: billing._id })
+        : Promise.resolve(),
+      SubscriptionRevisionHistory.deleteMany({
+        _id: {
+          $in: subscriptionRevisions.map((revision) => revision._id),
+        },
+      }),
+      SubscriptionDetails.deleteMany({
+        _id: { $in: subscriptions.map((subscription) => subscription._id) },
+      }),
+      Quote.updateOne(
+        { _id: quote._id },
+        { $set: { status: "APPROVED", subscription_details: [] } },
+      ),
+    ]);
+    throw error;
+  }
+}
+
 function quoteQuery(quoteId) {
   return Quote.findById(quoteId)
     .populate({
@@ -355,26 +604,60 @@ export async function createQuotation(req, res) {
 
   let quote;
   let revision;
+  let workflowResult;
   try {
     const pricedQuotation = await priceQuotation(body);
     quote = await Quote.create({
-      ...normalizeQuoteInput(pricedQuotation),
+      ...applyCreationRiskWorkflow(pricedQuotation),
+      subscription_details: [],
       is_latest_quote: true,
     });
     revision = await QuoteRevisionHistory.create({
       quote_version: 1,
       quote_id: quote._id,
     });
-    const createdQuote = await quoteQuery(quote._id);
+    workflowResult = await advanceApprovedSubscriptionQuote(quote);
+    const createdQuote = await quoteQuery(workflowResult.quote._id);
 
     logger.info("Quotation created", {
       quote_id: String(quote._id),
       negotiation_id: revision.negotiation_id,
+      risk: createdQuote.risk,
+      status: createdQuote.status,
+      invoice_id: workflowResult.billing?.invoice_id ?? null,
     });
 
-    res.status(201).json({ quote: createdQuote, revision: revision.toObject() });
+    res.status(201).json({
+      quote: createdQuote,
+      revision: revision.toObject(),
+      billing: workflowResult.billing?.toObject() ?? null,
+    });
   } catch (error) {
+    if (workflowResult?.reservations?.length) {
+      await releaseInventoryReservations(workflowResult.reservations);
+    }
     await Promise.allSettled([
+      workflowResult?.billing?._id
+        ? Billing.deleteOne({ _id: workflowResult.billing._id })
+        : Promise.resolve(),
+      workflowResult?.subscriptionRevisions?.length
+        ? SubscriptionRevisionHistory.deleteMany({
+            _id: {
+              $in: workflowResult.subscriptionRevisions.map(
+                (subscriptionRevision) => subscriptionRevision._id,
+              ),
+            },
+          })
+        : Promise.resolve(),
+      workflowResult?.subscriptions?.length
+        ? SubscriptionDetails.deleteMany({
+            _id: {
+              $in: workflowResult.subscriptions.map(
+                (subscription) => subscription._id,
+              ),
+            },
+          })
+        : Promise.resolve(),
       revision?._id
         ? QuoteRevisionHistory.deleteOne({ _id: revision._id })
         : Promise.resolve(),
@@ -484,7 +767,13 @@ export async function updateQuotation(req, res) {
     ...quoteIntentFromSnapshot(currentQuote),
     ...updates,
   };
-  const nextValues = normalizeQuoteInput(await priceQuotation(nextIntent));
+  const inventoryCredits =
+    currentQuote.status === "NEGOTIATION"
+      ? inventoryByArticle(currentQuote.products)
+      : new Map();
+  const nextValues = normalizeQuoteInput(
+    await priceQuotation(nextIntent, { inventoryCredits }),
+  );
 
   const acquired = await Quote.updateOne(
     { _id: currentQuote._id, is_latest_quote: true },
@@ -500,6 +789,8 @@ export async function updateQuotation(req, res) {
 
   let newQuote;
   let newRevision;
+  let workflowResult;
+  let releasedInventory = [];
   try {
     newQuote = await Quote.create({
       ...nextValues,
@@ -510,18 +801,69 @@ export async function updateQuotation(req, res) {
       negotiation_id: currentRevision.negotiation_id,
       quote_id: newQuote._id,
     });
-    const updatedQuote = await quoteQuery(newQuote._id);
+    workflowResult = await advanceApprovedSubscriptionQuote(newQuote);
+
+    if (
+      currentQuote.status !== "NEGOTIATION" &&
+      workflowResult.quote.status === "NEGOTIATION" &&
+      workflowResult.reservations.length === 0
+    ) {
+      workflowResult.reservations = await reserveQuoteInventory(
+        workflowResult.quote.products,
+      );
+    }
+
+    if (
+      currentQuote.status === "NEGOTIATION" &&
+      workflowResult.quote.status !== "NEGOTIATION"
+    ) {
+      releasedInventory = await releaseQuoteInventory(currentQuote.products);
+    }
+
+    const updatedQuote = await quoteQuery(workflowResult.quote._id);
 
     logger.info("Quotation revision created", {
       previous_quote_id: String(currentQuote._id),
       quote_id: String(newQuote._id),
       negotiation_id: newRevision.negotiation_id,
       quote_version: newRevision.quote_version,
+      released_inventory_count: releasedInventory.length,
     });
 
-    res.json({ quote: updatedQuote, revision: newRevision.toObject() });
+    res.json({
+      quote: updatedQuote,
+      revision: newRevision.toObject(),
+      billing: workflowResult.billing?.toObject() ?? null,
+    });
   } catch (error) {
+    if (releasedInventory.length > 0) {
+      await restoreReleasedInventory(releasedInventory);
+    }
+    if (workflowResult?.reservations?.length) {
+      await releaseInventoryReservations(workflowResult.reservations);
+    }
     await Promise.allSettled([
+      workflowResult?.billing?._id
+        ? Billing.deleteOne({ _id: workflowResult.billing._id })
+        : Promise.resolve(),
+      workflowResult?.subscriptionRevisions?.length
+        ? SubscriptionRevisionHistory.deleteMany({
+            _id: {
+              $in: workflowResult.subscriptionRevisions.map(
+                (subscriptionRevision) => subscriptionRevision._id,
+              ),
+            },
+          })
+        : Promise.resolve(),
+      workflowResult?.subscriptions?.length
+        ? SubscriptionDetails.deleteMany({
+            _id: {
+              $in: workflowResult.subscriptions.map(
+                (subscription) => subscription._id,
+              ),
+            },
+          })
+        : Promise.resolve(),
       newRevision?._id
         ? QuoteRevisionHistory.deleteOne({ _id: newRevision._id })
         : Promise.resolve(),

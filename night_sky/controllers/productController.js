@@ -3,6 +3,7 @@ import { logger } from "@app/observability";
 import {
   appendReportingHsn,
   Article,
+  CategoryDiscount,
   Hsn,
   ITEM_CATEGORIES,
   Item,
@@ -13,6 +14,11 @@ import {
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const CATEGORY_DISCOUNT_FIELDS = Object.freeze({
+  HARDWARE: "hardware",
+  SERVICES: "service",
+  SUBSCRIPTION: "subscription",
+});
 
 function sendDatabaseUnavailable(res) {
   res.status(503).json({
@@ -232,7 +238,12 @@ export async function getProduct(req, res) {
     return;
   }
 
-  const product = await productQuery(req.params.item_id);
+  const [product, categoryDiscount] = await Promise.all([
+    productQuery(req.params.item_id),
+    CategoryDiscount.findOne()
+      .sort({ updatedAt: -1, _id: -1 })
+      .lean(),
+  ]);
 
   if (!product) {
     res.status(404).json({
@@ -242,7 +253,18 @@ export async function getProduct(req, res) {
     return;
   }
 
-  res.json({ product });
+  const categoryDiscountField = CATEGORY_DISCOUNT_FIELDS[product.categories[0]];
+  const applicableCategoryDiscount =
+    categoryDiscount && categoryDiscountField
+      ? categoryDiscount[categoryDiscountField]
+      : null;
+
+  res.json({
+    product: {
+      ...product,
+      category_discount: applicableCategoryDiscount,
+    },
+  });
 }
 
 export async function createHsn(req, res) {

@@ -253,7 +253,7 @@ function reportingHsnMap(hsnDocuments) {
   return result;
 }
 
-export async function priceQuotation(input) {
+export async function priceQuotation(input, { inventoryCredits = new Map() } = {}) {
   if (!mongoose.isObjectIdOrHexString(input.customer)) {
     throw pricingError(
       400,
@@ -387,18 +387,18 @@ export async function priceQuotation(input) {
       );
     }
 
-    if (
-      category !== "SUBSCRIPTION" &&
-      product.inv > (article.inventory?.sellable ?? 0)
-    ) {
+    const availableInventory =
+      (article.inventory?.sellable ?? 0) +
+      (inventoryCredits.get(String(article._id)) ?? 0);
+    if (category !== "SUBSCRIPTION" && product.inv > availableInventory) {
       throw pricingError(
         409,
         "INSUFFICIENT_INVENTORY",
-        `Only ${article.inventory?.sellable ?? 0} unit(s) are sellable for article ${product.article_id}`,
+        `Only ${availableInventory} unit(s) are available for article ${product.article_id}`,
         {
           article_id: product.article_id,
           requested: product.inv,
-          available: article.inventory?.sellable ?? 0,
+          available: availableInventory,
         },
       );
     }
