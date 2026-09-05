@@ -167,6 +167,8 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
   )
   assert.equal(productSchema.path('item_id').options.ref, 'Item')
   assert.equal(productSchema.path('article_id').options.ref, 'Article')
+  assert.equal(productSchema.path('store_id').instance, 'ObjectId')
+  assert.equal(productSchema.path('store_id').options.ref, 'Store')
   assert.deepEqual(productSchema.path('category').options.enum, [
     'HARDWARE',
     'SERVICES',

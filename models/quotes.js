@@ -76,6 +76,11 @@ const quotedProductSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 200 },
   hsn: { type: String, required: true, trim: true, maxlength: 100 },
   category: { type: String, enum: ITEM_CATEGORIES, required: true },
+  store_id: {
+    type: Schema.Types.ObjectId,
+    ref: Store.modelName,
+    default: null,
+  },
   gst: percentage(),
   unit_price: nonNegativeNumber(),
   product_discount: percentage(),

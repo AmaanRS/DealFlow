@@ -73,7 +73,8 @@ export async function getQuoteInventory(req, res) {
   }
 
   const quote = await Quote.findById(quoteId)
-    .select("products.article_id products.inv")
+    .select("products.article_id products.inv products.store_id")
+    .populate("products.store_id")
     .lean();
 
   if (!quote) {
@@ -115,6 +116,9 @@ export async function getQuoteInventory(req, res) {
     quote_id: String(quote._id),
     articles: selectedProducts.map((product) => ({
       ...articleById.get(String(product.article_id)),
+      store_id:
+        product.store_id ??
+        articleById.get(String(product.article_id)).store_id,
       inv: product.inv,
     })),
     pagination: {
@@ -303,4 +307,109 @@ export async function createProduct(req, res) {
 
     throw error;
   }
+}
+
+export async function addInventory(req, res) {
+  if (!isDatabaseReady()) {
+    sendDatabaseUnavailable(res);
+    return;
+  }
+
+  if (!req.body || Array.isArray(req.body) || typeof req.body !== "object") {
+    res.status(400).json({
+      code: "INVALID_REQUEST_BODY",
+      message: "The request body must be a JSON object",
+    });
+    return;
+  }
+
+  const unsupportedFields = Object.keys(req.body).filter(
+    (field) => !["article_id", "inventory"].includes(field),
+  );
+  if (unsupportedFields.length > 0) {
+    res.status(400).json({
+      code: "UNKNOWN_FIELDS",
+      message: `Unsupported field(s): ${unsupportedFields.join(", ")}`,
+    });
+    return;
+  }
+
+  const { article_id: articleId, inventory } = req.body;
+  if (!mongoose.isObjectIdOrHexString(articleId)) {
+    res.status(400).json({
+      code: "INVALID_ARTICLE_ID",
+      message: "article_id must be a valid MongoDB ObjectId",
+    });
+    return;
+  }
+
+  if (!inventory || Array.isArray(inventory) || typeof inventory !== "object") {
+    res.status(400).json({
+      code: "INVALID_INVENTORY",
+      message: "inventory must be a JSON object",
+    });
+    return;
+  }
+
+  const unsupportedInventoryFields = Object.keys(inventory).filter(
+    (field) => !["sellable", "reserved"].includes(field),
+  );
+  if (unsupportedInventoryFields.length > 0) {
+    res.status(400).json({
+      code: "UNKNOWN_INVENTORY_FIELDS",
+      message: `Unsupported inventory field(s): ${unsupportedInventoryFields.join(", ")}`,
+    });
+    return;
+  }
+
+  const increments = {};
+  for (const field of ["sellable", "reserved"]) {
+    if (inventory[field] === undefined) continue;
+
+    if (!Number.isInteger(inventory[field]) || inventory[field] < 0) {
+      res.status(400).json({
+        code: "INVALID_INVENTORY",
+        message: `inventory.${field} must be a non-negative integer`,
+      });
+      return;
+    }
+
+    if (inventory[field] > 0) {
+      increments[`inventory.${field}`] = inventory[field];
+    }
+  }
+
+  if (Object.keys(increments).length === 0) {
+    res.status(400).json({
+      code: "INVALID_INVENTORY",
+      message: "At least one inventory amount must be greater than 0",
+    });
+    return;
+  }
+
+  const article = await Article.findByIdAndUpdate(
+    articleId,
+    { $inc: increments },
+    { returnDocument: "after" },
+  ).populate("store_id");
+
+  if (!article) {
+    res.status(404).json({
+      code: "ARTICLE_NOT_FOUND",
+      message: "Article not found",
+    });
+    return;
+  }
+
+  logger.info("Article inventory added", {
+    article_id: String(article._id),
+    ...Object.fromEntries(
+      Object.entries(increments).map(([field, value]) => [
+        field.replace("inventory.", "added_"),
+        value,
+      ]),
+    ),
+  });
+
+  res.json({ article });
 }

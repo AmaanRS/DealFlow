@@ -11,3 +11,5 @@ export {
 export { CategoryDiscount, TierDiscount } from "@app/models/discounts";
 
 export { Quote } from "@app/models/quotes";
+
+export { User } from "@app/models/auth";

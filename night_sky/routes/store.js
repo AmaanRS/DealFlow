@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { getStores } from "../controllers/storeController.js";
+import {
+  createStore,
+  getStores,
+  splitQuoteByStore,
+} from "../controllers/storeController.js";
 
 const router = Router();
 
@@ -10,5 +14,7 @@ function asyncRoute(handler) {
 }
 
 router.get("/get_stores", asyncRoute(getStores));
+router.post("/create_store", asyncRoute(createStore));
+router.post("/store_split", asyncRoute(splitQuoteByStore));
 
 export default router;
