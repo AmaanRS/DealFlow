@@ -47,6 +47,11 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
     networks:
       - dealflow
 
@@ -57,7 +62,7 @@ services:
       api-gateway:
         condition: service_healthy
       frontend:
-        condition: service_started
+        condition: service_healthy
     environment:
       APISIX_STAND_ALONE: "true"
     volumes:
