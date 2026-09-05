@@ -5,7 +5,7 @@ Frontend owner: React client
 Backend owner: Authentication service  
 Gateway: Apache APISIX
 
-This is the frontend/backend handoff contract. The frontend already uses these paths and response shapes through `src/api/authApi.js`.
+This is the frontend/API gateway handoff contract. The frontend already uses these paths and response shapes through `src/api/authApi.js`.
 
 ## 1. Required business rules
 
@@ -429,18 +429,18 @@ The `sessions` collection stores both internal and customer sessions with an exp
 ## 7. APISIX placement
 
 ```text
-React browser -> Apache APISIX -> auth/backend service -> MongoDB
+React browser -> Apache APISIX -> API gateway service -> MongoDB
 ```
 
-Use APISIX initially for routing, TLS termination, CORS, request IDs, access logs, and rate limiting. The backend remains responsible for registration, password verification, approval state, RBAC, session creation/revocation, CSRF checks, database writes, and audit records.
+Use APISIX initially for routing, TLS termination, CORS, request IDs, access logs, and rate limiting. The API gateway service remains responsible for registration, password verification, approval state, RBAC, session creation/revocation, CSRF checks, database writes, and audit records.
 
-Do not add APISIX OAuth/OIDC plugins merely because the app has a login screen. Those plugins are useful when APISIX validates tokens issued by a separate identity provider such as Keycloak, Auth0, or Google. For this email/password plus admin-approval flow, backend-owned HttpOnly sessions are simpler and easier to explain.
+Do not add APISIX OAuth/OIDC plugins merely because the app has a login screen. Those plugins are useful when APISIX validates tokens issued by a separate identity provider such as Keycloak, Auth0, or Google. For this email/password plus admin-approval flow, application-owned HttpOnly sessions are simpler and easier to explain.
 
 APISIX must forward the Cookie header, must not cache auth responses, and should restrict credentialed CORS to the frontend origin.
 
 ## 8. Frontend adapter and isolated mock mode
 
-React imports one adapter from `src/api/authApi.js`, so screens do not know whether the response came from the mock or backend.
+React imports one adapter from `src/api/authApi.js`, so screens do not know whether the response came from the mock or API gateway.
 
 The normal frontend always calls this contract with `credentials: "include"`:
 
@@ -448,7 +448,7 @@ The normal frontend always calls this contract with `credentials: "include"`:
 VITE_USE_MOCK_AUTH=false
 ```
 
-Set `VITE_USE_MOCK_AUTH=true` only for isolated frontend development when the backend is intentionally unavailable. Mock mode is never named or exposed in the rendered product UI.
+Set `VITE_USE_MOCK_AUTH=true` only for isolated frontend development when the API gateway is intentionally unavailable. Mock mode is never named or exposed in the rendered product UI.
 
 The mock stores only fake demo records in browser local storage so an in-progress demo can survive refreshes. It includes plain mock passwords and must never be copied into production code or used with real credentials.
 

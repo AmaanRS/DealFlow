@@ -8,12 +8,12 @@ customer quotation portal.
 From the repository root:
 
 ```bash
-cp backend/.env.example backend/.env
+cp api-gateway/.env.example api-gateway/.env
 docker compose up --build
 ```
 
 Open `http://localhost:9080`. Apache APISIX serves the frontend and proxies
-`/api/*` to the authentication service.
+`/api/*` to the API gateway service.
 
 ## Frontend development
 
@@ -38,9 +38,9 @@ quotation-scoped HttpOnly session and immediately removes it from the URL.
 - `src/workspace/` - dashboard, quotations, pipeline, approvals, fulfillment,
   billing, configuration, and reports.
 - `src/portal/CustomerPortal.jsx` - separate customer negotiation workspace.
-- `src/api/authApi.js` - backend request adapter.
+- `src/api/authApi.js` - API gateway request adapter.
 - `src/contracts/auth.js` - endpoint, role, and status constants.
-- `contracts/auth-api.md` - backend handoff contract.
+- `contracts/api-gateway.md` - API gateway authentication handoff contract.
 - `contracts/workspace-api.md` - quotation, approval, fulfillment, billing,
   configuration, reporting, and customer-portal handoff contract.
 

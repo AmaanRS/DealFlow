@@ -2,10 +2,10 @@
 
 Version: `v1`  
 Frontend owner: React workspace  
-Backend owner: Deal and operations services  
+Server owner: API gateway and downstream deal/operations services
 Gateway: Apache APISIX
 
-The screens currently use the same shapes from seeded client state, so backend
+The screens currently use the same shapes from seeded client state, so server
 work can proceed without blocking UI work. Replace the client adapter one resource
 at a time; do not change these shapes silently.
 
@@ -15,7 +15,7 @@ at a time; do not change these shapes silently.
 - Portal endpoints require the separate, quotation-scoped portal session.
 - Money is an integer in minor units (`125000` means INR 1,250.00).
 - Dates use ISO 8601. IDs are opaque strings.
-- The backend recalculates totals, margins, risk, approvals, stock, proration and
+- The API gateway recalculates totals, margins, risk, approvals, stock, proration and
   payment state. Never trust a calculated total submitted by the browser.
 - Mutating requests accept an `Idempotency-Key` header.
 - Concurrent updates use an integer `version`; stale updates return `409`.
@@ -146,7 +146,7 @@ estimated cost and the reason for the recommendation.
 { "version": 2, "recommendationId": "alloc_01", "groups": [{ "warehouseId": "wh_main", "lines": [{ "lineId": "line_01", "quantity": 3 }] }] }
 ```
 
-The backend validates live inventory and reserves all groups transactionally. A
+The API gateway validates live inventory and reserves all groups transactionally. A
 stock race returns `409 STOCK_CHANGED` with a refreshed recommendation.
 
 `POST /api/v1/orders/:quotationId/fulfillment/consolidate-backorder`
@@ -218,6 +218,6 @@ Counter offer request:
 }
 ```
 
-The backend recalculates policy. If the counter crosses a threshold, it changes
+The API gateway recalculates policy. If the counter crosses a threshold, it changes
 the quote to `PENDING_APPROVAL`, creates fresh approval steps, and records the
 customer action in the audit trail.

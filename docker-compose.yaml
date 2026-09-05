@@ -14,15 +14,15 @@ services:
     networks:
       - dealflow
 
-  auth-api:
+  api-gateway:
     build:
-      context: ./backend
+      context: ./api-gateway
     restart: unless-stopped
     depends_on:
       mongodb:
         condition: service_healthy
     env_file:
-      - ./backend/.env
+      - ./api-gateway/.env
     expose:
       - "4000"
     healthcheck:
@@ -54,7 +54,7 @@ services:
     image: apache/apisix:${APISIX_IMAGE_TAG:-3.17.0-debian}
     restart: unless-stopped
     depends_on:
-      auth-api:
+      api-gateway:
         condition: service_healthy
       frontend:
         condition: service_started

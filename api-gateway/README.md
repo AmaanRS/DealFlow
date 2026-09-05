@@ -1,4 +1,4 @@
-# DealFlow authentication service
+# DealFlow API gateway service
 
 This service owns internal registration/login, administrator approval, revocable
 HttpOnly sessions, and quotation-scoped customer portal invitations.
@@ -14,7 +14,7 @@ npm run dev
 MongoDB must be available at the configured `MONGODB_URI`. For the complete stack,
 use the root `docker-compose.yaml` file instead. The checked-in example uses the
 Docker hostname `mongodb`; change it to `mongodb://localhost:27017/dealflow` when
-running the backend directly against a host-installed MongoDB.
+running the API gateway directly against a host-installed MongoDB.
 
 ## Request flow
 
