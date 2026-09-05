@@ -9,6 +9,7 @@ const PORTAL_COOKIE = 'dealflow_portal_session'
 const SHORT_SESSION_MS = 8 * 60 * 60 * 1000
 const REMEMBERED_SESSION_MS = 7 * 24 * 60 * 60 * 1000
 const PORTAL_SESSION_MS = 60 * 60 * 1000
+const secureCookies = config.get('node_env') === 'production'
 
 export function normalizeEmail(value) {
   return String(value ?? '').trim().toLowerCase()
@@ -27,13 +28,13 @@ export function createOpaqueToken() {
 }
 
 export function hashToken(token) {
-  return createHmac('sha256', config.sessionPepper).update(token).digest('hex')
+  return createHmac('sha256', config.get('session_pepper')).update(token).digest('hex')
 }
 
 function cookieOptions(expiresAt) {
   return {
     httpOnly: true,
-    secure: config.secureCookies,
+    secure: secureCookies,
     sameSite: 'lax',
     path: '/',
     expires: expiresAt,
@@ -157,7 +158,7 @@ export async function revokeSession(req, kind) {
 export function clearInternalCookie(res) {
   res.clearCookie(INTERNAL_COOKIE, {
     httpOnly: true,
-    secure: config.secureCookies,
+    secure: secureCookies,
     sameSite: 'lax',
     path: '/',
   })
@@ -166,7 +167,7 @@ export function clearInternalCookie(res) {
 export function clearPortalCookie(res) {
   res.clearCookie(PORTAL_COOKIE, {
     httpOnly: true,
-    secure: config.secureCookies,
+    secure: secureCookies,
     sameSite: 'lax',
     path: '/',
   })

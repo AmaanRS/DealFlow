@@ -97,6 +97,7 @@ function WorkspaceShell({ onLogout }) {
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const section = location.pathname.split('/')[1] || 'dashboard'
+  const [counts, setCount] = useState(0)
 
   function startQuote() {
     const id = createQuote()
@@ -156,6 +157,13 @@ function WorkspaceShell({ onLogout }) {
         </nav>
 
         <div className="workspace-sidebar__actions">
+          {/* <button type="button" onClick={()=> setCount(counts + 1)}>
+           +
+          </button>
+          <span>Count {counts}</span>
+          <button type="button" onClick={()=> setCount(counts - 1)}>
+           -
+          </button> */}
           <button type="button" onClick={syncData}>
             <RefreshCw size={16} />
             Reload data

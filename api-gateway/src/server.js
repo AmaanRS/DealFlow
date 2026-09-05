@@ -1,15 +1,14 @@
 import mongoose from 'mongoose'
 import { app } from './app.js'
 import { config } from './config.js'
-import { seedAuthenticationData } from './seed.js'
 
-await mongoose.connect(config.mongodbUri)
+const port = config.get('port')
+
+await mongoose.connect(config.get('mongodb_uri'))
 console.info('Connected to MongoDB')
 
-await seedAuthenticationData()
-
-const server = app.listen(config.port, '0.0.0.0', () => {
-  console.info(`DealFlow auth API listening on port ${config.port}`)
+const server = app.listen(port, '0.0.0.0', () => {
+  console.info(`DealFlow auth API listening on port ${port}`)
 })
 
 async function shutdown(signal) {

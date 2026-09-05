@@ -162,9 +162,9 @@ Pending account: `403 Forbidden`
 
 Other `403` codes are `ACCOUNT_REJECTED` and `ACCOUNT_SUSPENDED`. Rate-limit attempts by both IP and normalized email.
 
-### Read the current session
+### Read the current user
 
-`GET /api/v1/auth/session`
+`GET /api/v1/auth/me`
 
 Authenticated response: `200 OK`
 

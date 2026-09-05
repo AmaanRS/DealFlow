@@ -187,7 +187,7 @@ function InternalAuth() {
   useEffect(() => {
     let mounted = true
     authApi
-      .getSession()
+      .getCurrentUser()
       .then((result) => {
         if (mounted && result.authenticated) setSessionUser(result.user)
       })

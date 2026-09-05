@@ -58,8 +58,8 @@ routes:
     priority: 0
     upstream:
       type: roundrobin
-      pass_host: node
+      pass_host: pass
       nodes:
-        frontend:80: 1
+        frontend:5173: 1
 
 #END

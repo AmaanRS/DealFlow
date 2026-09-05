@@ -36,7 +36,7 @@ export const INTERNAL_ROLE_OPTIONS = Object.freeze([
 export const AUTH_ENDPOINTS = Object.freeze({
   register: '/api/v1/auth/registrations',
   login: '/api/v1/auth/login',
-  session: '/api/v1/auth/session',
+  me: '/api/v1/auth/me',
   logout: '/api/v1/auth/logout',
   registrationRequests: '/api/v1/admin/registration-requests',
   registrationDecision: (requestId) =>

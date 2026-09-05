@@ -147,7 +147,7 @@ router.post(
 )
 
 router.get(
-  '/session',
+  '/me',
   asyncRoute(async (req, res) => {
     const session = await readInternalSession(req)
     if (!session) {

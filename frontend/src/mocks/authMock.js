@@ -226,7 +226,7 @@ export const mockAuthApi = {
     }
   },
 
-  async getSession() {
+  async getCurrentUser() {
     await wait()
     const user = readUsers().find((candidate) => candidate.id === activeUserId)
     return user

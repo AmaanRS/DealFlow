@@ -42,8 +42,8 @@ const realAuthApi = {
     })
   },
 
-  getSession() {
-    return request(AUTH_ENDPOINTS.session)
+  getCurrentUser() {
+    return request(AUTH_ENDPOINTS.me)
   },
 
   logout() {

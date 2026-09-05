@@ -30,14 +30,14 @@ approval decisions, internal sessions, and customer portal scope.
 
 - `POST /api/v1/auth/registrations`
 - `POST /api/v1/auth/login`
-- `GET /api/v1/auth/session`
+- `GET /api/v1/auth/me`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/admin/registration-requests?status=PENDING_APPROVAL`
 - `PATCH /api/v1/admin/registration-requests/:requestId`
 
-The configured administrator is seeded only when its email does not exist. A
-registration stores `requestedRole` but leaves `role` null until the administrator
-approves it.
+The gateway does not seed users or other application data at startup. Administrator
+accounts must be provisioned outside this service. A registration stores
+`requestedRole` but leaves `role` null until an administrator approves it.
 
 ## Customer portal
 
@@ -59,5 +59,3 @@ Portal endpoints:
 - `GET /api/v1/portal/session` - restore the portal session
 - `POST /api/v1/portal/logout`
 - `GET /api/v1/portal/quotation-access` - demonstrates quotation-scoped access
-
-The sample token in `.env.example` is local seed data only.

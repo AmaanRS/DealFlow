@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js'
 import portalRoutes from './routes/portal.js'
 
 export const app = express()
+const allowedOrigins = config.get('allowed_origins')
 
 app.disable('x-powered-by')
 app.set('trust proxy', 1)
@@ -31,7 +32,7 @@ app.use(
   cors({
     credentials: true,
     origin(origin, callback) {
-      if (!origin || config.allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true)
         return
       }
@@ -50,7 +51,7 @@ app.use((req, res, next) => {
 
   if (
     stateChanging &&
-    ((origin && !config.allowedOrigins.includes(origin)) || fetchSite === 'cross-site')
+    ((origin && !allowedOrigins.includes(origin)) || fetchSite === 'cross-site')
   ) {
     res.status(403).json({
       code: 'CSRF_CHECK_FAILED',

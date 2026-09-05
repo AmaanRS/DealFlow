@@ -145,7 +145,7 @@ router.post(
       },
     })
 
-    const appUrl = config.publicAppUrl.replace(/\/$/, '')
+    const appUrl = config.get('public_app_url').replace(/\/$/, '')
     res.status(201).json({
       invitation: {
         id: String(invitation._id),

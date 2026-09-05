@@ -42,13 +42,17 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        VITE_USE_MOCK_AUTH: "false"
+      target: development
     restart: unless-stopped
+    environment:
+      VITE_USE_MOCK_AUTH: "false"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
     expose:
-      - "80"
+      - "5173"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:5173/"]
       interval: 5s
       timeout: 4s
       retries: 20
@@ -152,6 +156,7 @@ networks:
 
 volumes:
   dealflow-mongodb:
+  frontend-node-modules:
   redis-data:
   loki-data:
   grafana-data:
