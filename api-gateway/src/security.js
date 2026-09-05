@@ -1,8 +1,8 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { config } from './config.js'
-import { SESSION_KINDS, USER_STATUSES } from './constants.js'
-import { PortalInvitation, Session } from './models.js'
+import { SESSION_KINDS, USER_ROLES, USER_STATUSES } from './constants.js'
+import { PortalInvitation, Session, User } from './models.js'
 
 const INTERNAL_COOKIE = 'dealflow_session'
 const PORTAL_COOKIE = 'dealflow_portal_session'
@@ -21,6 +21,41 @@ export function hashPassword(password) {
 
 export function verifyPassword(password, passwordHash) {
   return bcrypt.compare(password, passwordHash)
+}
+
+export async function ensureUserVerifiedForLogin(user) {
+  if (user.is_deleted) return false
+  if (user.is_verified) return true
+
+  const hasLegacyApprovalEvidence =
+    user.role === USER_ROLES.ADMIN || Boolean(user.approval?.reviewedAt)
+
+  if (
+    user.status !== USER_STATUSES.ACTIVE ||
+    !hasLegacyApprovalEvidence
+  ) {
+    return false
+  }
+
+  // Migrate only accounts with evidence that they were approved before
+  // is_verified existed. An explicitly false field is never overwritten.
+  const migration = await User.updateOne(
+    {
+      _id: user._id,
+      status: USER_STATUSES.ACTIVE,
+      is_verified: { $exists: false },
+      $or: [
+        { role: USER_ROLES.ADMIN },
+        { 'approval.reviewedAt': { $ne: null } },
+      ],
+    },
+    { $set: { is_verified: true } },
+  )
+
+  if (migration.modifiedCount !== 1) return false
+
+  user.is_verified = true
+  return true
 }
 
 export function createOpaqueToken() {
@@ -105,12 +140,19 @@ async function readSession(req, kind) {
 
   if (!session) return null
 
-  if (
-    kind === SESSION_KINDS.INTERNAL &&
-    (!session.userId || session.userId.status !== USER_STATUSES.ACTIVE)
-  ) {
-    await Session.updateOne({ _id: session._id }, { $set: { revokedAt: new Date() } })
-    return null
+  if (kind === SESSION_KINDS.INTERNAL) {
+    const user = session.userId
+    if (
+      !user ||
+      user.status !== USER_STATUSES.ACTIVE ||
+      !(await ensureUserVerifiedForLogin(user))
+    ) {
+      await Session.updateOne(
+        { _id: session._id },
+        { $set: { revokedAt: new Date() } },
+      )
+      return null
+    }
   }
 
   if (kind === SESSION_KINDS.CUSTOMER_PORTAL) {
@@ -181,6 +223,16 @@ export function publicUser(user) {
     role: user.role,
     requestedRole: user.requestedRole,
     status: user.status,
+    is_verified: Boolean(user.is_verified),
+    is_deleted: Boolean(user.is_deleted),
+    _custom_json: user._custom_json
+      ? {
+          delivery_address: user._custom_json.delivery_address,
+          lat: user._custom_json.lat,
+          long: user._custom_json.long,
+          tier: user._custom_json.tier,
+        }
+      : null,
   }
 }
 

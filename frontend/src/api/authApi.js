@@ -42,6 +42,13 @@ const realAuthApi = {
     })
   },
 
+  forgotPassword(payload) {
+    return request(AUTH_ENDPOINTS.forgotPassword, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
   getCurrentUser() {
     return request(AUTH_ENDPOINTS.me)
   },
@@ -55,9 +62,30 @@ const realAuthApi = {
     return request(`${AUTH_ENDPOINTS.registrationRequests}?${query}`)
   },
 
+  approveUser(userId) {
+    return request(AUTH_ENDPOINTS.approveUser, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    })
+  },
+
   reviewRegistration(requestId, payload) {
     return request(AUTH_ENDPOINTS.registrationDecision(requestId), {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  createTierDiscount(payload) {
+    return request(AUTH_ENDPOINTS.createTierDiscount, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  createCategoryDiscount(payload) {
+    return request(AUTH_ENDPOINTS.createCategoryDiscount, {
+      method: 'POST',
       body: JSON.stringify(payload),
     })
   },

@@ -72,9 +72,23 @@ function ProductsConfiguration({ products, setProducts }) {
   )
 }
 
-function DiscountConfiguration({ rules, setRules }) {
+function DiscountConfiguration({
+  rules,
+  setRules,
+  categoryRules,
+  setCategoryRules,
+  onCreateTier,
+  onCreateCategory,
+  savingTier,
+  savingCategory,
+  canManage,
+}) {
   function updateRule(tier, field, value) {
     setRules((current) => current.map((rule) => rule.tier === tier ? { ...rule, [field]: Number(value) } : rule))
+  }
+
+  function updateCategory(category, value) {
+    setCategoryRules((current) => ({ ...current, [category]: Number(value) }))
   }
 
   return (
@@ -85,7 +99,17 @@ function DiscountConfiguration({ rules, setRules }) {
             <article key={rule.tier}>
               <span className={`tier-medal tier-medal--${rule.tier.toLowerCase()}`}>{rule.tier[0]}</span>
               <div><strong>{rule.tier}</strong><small>Standard discretionary discount</small></div>
-              <label><input type="number" min="0" max="60" value={rule.ceiling} onChange={(event) => updateRule(rule.tier, 'ceiling', event.target.value)} />%</label>
+              <span className="discount-rule-actions">
+                <label><input type="number" min="0" value={rule.ceiling} onChange={(event) => updateRule(rule.tier, 'ceiling', event.target.value)} />%</label>
+                <button
+                  className="button button--quiet button--small"
+                  type="button"
+                  disabled={!canManage || savingTier === rule.tier}
+                  onClick={() => onCreateTier(rule)}
+                >
+                  {savingTier === rule.tier ? 'Creating…' : 'Create'}
+                </button>
+              </span>
             </article>
           ))}
         </div>
@@ -101,10 +125,28 @@ function DiscountConfiguration({ rules, setRules }) {
         </div>
       </Panel>
 
-      <Panel title="Category ceilings" description="A stricter category cap overrides the customer-tier allowance." className="configuration-span">
+      <Panel
+        title="Category ceilings"
+        description="A stricter category cap overrides the customer-tier allowance."
+        className="configuration-span"
+        action={(
+          <button
+            className="button button--primary button--small"
+            type="button"
+            disabled={!canManage || savingCategory}
+            onClick={onCreateCategory}
+          >
+            <Save size={13} /> {savingCategory ? 'Creating…' : 'Create category policy'}
+          </button>
+        )}
+      >
         <div className="category-rule-grid">
-          {[['Hardware', 15, 'Healthy unit margins'], ['Services', 10, 'Labour margin protected'], ['Subscriptions', 12, 'Recurring lifetime value']].map(([name, ceiling, detail]) => (
-            <article key={name}><span><strong>{name}</strong><small>{detail}</small></span><label><input defaultValue={ceiling} type="number" min="0" max="60" />%</label></article>
+          {[
+            ['hardware', 'Hardware', 'Healthy unit margins'],
+            ['service', 'Services', 'Labour margin protected'],
+            ['subscription', 'Subscriptions', 'Fixed at zero by policy'],
+          ].map(([key, name, detail]) => (
+            <article key={key}><span><strong>{name}</strong><small>{detail}</small></span><label><input value={categoryRules[key]} type="number" min="0" disabled={key === 'subscription'} onChange={(event) => updateCategory(key, event.target.value)} />%</label></article>
           ))}
         </div>
         <div className="formula-note"><ShieldCheck size={18} /><span><strong>Blended risk is calculated, not hardcoded.</strong><small>Each line variance is weighted by line value, combined with the maximum breach and low-margin penalty.</small></span></div>
@@ -155,14 +197,80 @@ function RecommendationConfiguration() {
   )
 }
 
-function AccessRequests({ requests, loading, error, onReview }) {
+function AccessRequests({
+  requests,
+  loading,
+  error,
+  reviewing,
+  rejectionDraft,
+  onBeginRejection,
+  onCancelRejection,
+  onReasonChange,
+  onReview,
+}) {
   return (
     <Panel title="Internal access requests" description="Public registration requests a role; only an administrator can grant it.">
       {loading ? <p className="empty-copy">Loading access requests…</p> : error ? <div className="inline-error">{error}</div> : (
         <div className="access-request-list">
-          {requests.map((request) => (
-            <article key={request.id}><span className="request-avatar">{request.fullName.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div><strong>{request.fullName}</strong><small>{request.email}</small></div><span><small>Requested role</small><strong>{request.requestedRole.replaceAll('_', ' ')}</strong></span><div><button className="button button--danger button--small" type="button" onClick={() => onReview(request.id, 'REJECT')}><X size={13} /> Reject</button><button className="button button--success button--small" type="button" onClick={() => onReview(request.id, 'APPROVE')}><Check size={13} /> Approve</button></div></article>
-          ))}
+          {requests.map((request) => {
+            const isRejecting = rejectionDraft?.id === request.id
+
+            return (
+              <article key={request.id} className={isRejecting ? 'is-rejecting' : ''}>
+                <span className="request-avatar">{request.fullName.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span>
+                <div><strong>{request.fullName}</strong><small>{request.email}</small></div>
+                <span><small>Requested role · {request.is_verified ? 'Verified' : 'Unverified'}</small><strong>{request.requestedRole.replaceAll('_', ' ')}</strong></span>
+                <div className="access-request-actions">
+                  <button
+                    className="button button--danger button--small"
+                    type="button"
+                    disabled={Boolean(reviewing)}
+                    onClick={() => isRejecting ? onCancelRejection() : onBeginRejection(request.id)}
+                  >
+                    <X size={13} /> {isRejecting ? 'Cancel' : 'Reject'}
+                  </button>
+                  <button
+                    className="button button--success button--small"
+                    type="button"
+                    disabled={Boolean(reviewing)}
+                    onClick={() => onReview(request.id, 'APPROVE')}
+                  >
+                    <Check size={13} /> {reviewing?.id === request.id && reviewing.decision === 'APPROVE' ? 'Approving…' : 'Approve'}
+                  </button>
+                </div>
+
+                {isRejecting && (
+                  <form
+                    className="access-rejection-form"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      onReview(request.id, 'REJECT', rejectionDraft.reason.trim())
+                    }}
+                  >
+                    <label>
+                      <span>Reason shown to the user</span>
+                      <textarea
+                        autoFocus
+                        maxLength={500}
+                        minLength={3}
+                        placeholder="Explain why this registration was rejected…"
+                        required
+                        value={rejectionDraft.reason}
+                        onChange={(event) => onReasonChange(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="button button--danger button--small"
+                      type="submit"
+                      disabled={Boolean(reviewing) || rejectionDraft.reason.trim().length < 3}
+                    >
+                      <X size={13} /> {reviewing?.id === request.id ? 'Rejecting…' : 'Confirm rejection'}
+                    </button>
+                  </form>
+                )}
+              </article>
+            )
+          })}
           {!requests.length && <p className="empty-copy">No pending access requests.</p>}
         </div>
       )}
@@ -170,15 +278,27 @@ function AccessRequests({ requests, loading, error, onReview }) {
   )
 }
 
-export default function ConfigurationPage() {
+export default function ConfigurationPage({ initialTab = 'products' }) {
   const { user } = useWorkspace()
-  const [activeTab, setActiveTab] = useState('products')
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [products, setProducts] = useState(seededProducts)
   const [rules, setRules] = useState(seededDiscountRules)
+  const [categoryRules, setCategoryRules] = useState({
+    hardware: 15,
+    service: 10,
+    subscription: 0,
+  })
+  const [savingTier, setSavingTier] = useState('')
+  const [savingCategory, setSavingCategory] = useState(false)
   const [warehouses] = useState(seededWarehouses)
   const [plans] = useState(seededPlans)
   const [requests, setRequests] = useState([])
-  const [requestState, setRequestState] = useState({ loading: false, error: '' })
+  const [requestState, setRequestState] = useState({
+    loading: initialTab === 'access',
+    error: '',
+  })
+  const [reviewing, setReviewing] = useState(null)
+  const [rejectionDraft, setRejectionDraft] = useState(null)
 
   useEffect(() => {
     if (activeTab !== 'access' || user.role !== 'ADMIN') return
@@ -196,16 +316,58 @@ export default function ConfigurationPage() {
     return () => { mounted = false }
   }, [activeTab, user.role])
 
-  async function reviewRegistration(requestId, decision) {
+  async function reviewRegistration(requestId, decision, reason = null) {
+    if (reviewing) return
+    setReviewing({ id: requestId, decision })
     try {
-      await authApi.reviewRegistration(requestId, {
-        decision,
-        ...(decision === 'REJECT' ? { reason: 'The employee record could not be verified.' } : {}),
-      })
+      if (decision === 'APPROVE') {
+        await authApi.approveUser(requestId)
+      } else {
+        await authApi.reviewRegistration(requestId, {
+          decision,
+          reason,
+        })
+      }
       setRequests((current) => current.filter((item) => item.id !== requestId))
+      setRejectionDraft(null)
       toast.success(decision === 'APPROVE' ? 'Workspace access approved' : 'Access request rejected')
     } catch (error) {
+      if (error.status === 404 || error.status === 409) {
+        setRequests((current) => current.filter((item) => item.id !== requestId))
+        setRejectionDraft(null)
+      }
       toast.error(error.message)
+    } finally {
+      setReviewing(null)
+    }
+  }
+
+  async function createTierDiscount(rule) {
+    setSavingTier(rule.tier)
+    try {
+      const result = await authApi.createTierDiscount({
+        tier: rule.tier.toUpperCase(),
+        discount: rule.ceiling,
+      })
+      toast.success(`${result.tier_discount.tier} tier created`, {
+        description: `${result.tier_discount.discount}% customer discount`,
+      })
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setSavingTier('')
+    }
+  }
+
+  async function createCategoryDiscount() {
+    setSavingCategory(true)
+    try {
+      await authApi.createCategoryDiscount(categoryRules)
+      toast.success('Category discount policy created')
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setSavingCategory(false)
     }
   }
 
@@ -215,7 +377,7 @@ export default function ConfigurationPage() {
         eyebrow="Sales back-end"
         title="Configuration"
         description="Control the data and policies that govern pricing, approvals, fulfillment and recurring billing."
-        actions={<button className="button button--primary" type="button" onClick={() => toast.success('Configuration saved')}><Save size={15} /> Save changes</button>}
+        actions={activeTab === 'discounts' ? null : <button className="button button--primary" type="button" onClick={() => toast.success('Configuration saved')}><Save size={15} /> Save changes</button>}
       />
 
       <section className="configuration-tabs">
@@ -233,11 +395,35 @@ export default function ConfigurationPage() {
       </section>
 
       {activeTab === 'products' && <ProductsConfiguration products={products} setProducts={setProducts} />}
-      {activeTab === 'discounts' && <DiscountConfiguration rules={rules} setRules={setRules} />}
+      {activeTab === 'discounts' && (
+        <DiscountConfiguration
+          rules={rules}
+          setRules={setRules}
+          categoryRules={categoryRules}
+          setCategoryRules={setCategoryRules}
+          onCreateTier={createTierDiscount}
+          onCreateCategory={createCategoryDiscount}
+          savingTier={savingTier}
+          savingCategory={savingCategory}
+          canManage={user.role === 'ADMIN'}
+        />
+      )}
       {activeTab === 'warehouses' && <WarehouseConfiguration warehouses={warehouses} />}
       {activeTab === 'plans' && <PlanConfiguration plans={plans} />}
       {activeTab === 'recommendations' && <RecommendationConfiguration />}
-      {activeTab === 'access' && <AccessRequests requests={requests} loading={requestState.loading} error={user.role === 'ADMIN' ? requestState.error : 'Administrator access is required to review registrations.'} onReview={reviewRegistration} />}
+      {activeTab === 'access' && (
+        <AccessRequests
+          requests={requests}
+          loading={requestState.loading}
+          error={user.role === 'ADMIN' ? requestState.error : 'Administrator access is required to review registrations.'}
+          reviewing={reviewing}
+          rejectionDraft={rejectionDraft}
+          onBeginRejection={(id) => setRejectionDraft({ id, reason: '' })}
+          onCancelRejection={() => setRejectionDraft(null)}
+          onReasonChange={(reason) => setRejectionDraft((current) => current ? { ...current, reason } : current)}
+          onReview={reviewRegistration}
+        />
+      )}
     </div>
   )
 }

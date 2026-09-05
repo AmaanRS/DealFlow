@@ -10,9 +10,13 @@
 !night_sky/controllers/*.js
 !night_sky/routes/
 !night_sky/routes/*.js
+!models/
+!models/*.js
+!models/package.json
 !observability/
 !observability/*.js
 !observability/package.json
 observability/.env
 observability/node_modules
+models/node_modules
 night_sky/node_modules

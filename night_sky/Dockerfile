@@ -5,6 +5,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY night_sky/package.json ./night_sky/package.json
+COPY models/package.json ./models/package.json
 COPY observability/package.json ./observability/package.json
 RUN npm ci --omit=dev
 
@@ -14,6 +15,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 COPY --from=dependencies /app /app
+COPY --chown=node:node models/*.js models/package.json ./models/
 COPY --chown=node:node observability/*.js observability/package.json ./observability/
 COPY --chown=node:node night_sky/app.js night_sky/convict.js night_sky/models.js night_sky/package.json ./night_sky/
 COPY --chown=node:node night_sky/controllers ./night_sky/controllers

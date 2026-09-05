@@ -7,11 +7,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
+    "dev": "node --watch --import @app/observability/register src/server.js",
+    "start": "node --import @app/observability/register src/server.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@app/models": "^1.0.0",
+    "@app/observability": "^1.0.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "convict": "^6.2.5",

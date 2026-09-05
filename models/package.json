@@ -1,0 +1,19 @@
+{
+  "name": "@app/models",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./auth": "./auth.js",
+    "./catalog": "./catalog.js",
+    "./constants": "./constants.js",
+    "./discounts": "./discounts.js"
+  },
+  "peerDependencies": {
+    "mongoose": "^9.9.5"
+  }
+}

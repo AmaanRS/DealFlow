@@ -2,6 +2,8 @@ services:
   mongodb:
     image: mongo:7.0
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017"
     volumes:
       - dealflow-mongodb:/data/db
     healthcheck:
@@ -15,11 +17,14 @@ services:
 
   api-gateway:
     build:
-      context: ./api-gateway
+      context: .
+      dockerfile: api-gateway/Dockerfile
     restart: unless-stopped
     depends_on:
       mongodb:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     env_file:
       - ./api-gateway/.env
     expose:
@@ -30,13 +35,14 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "const net=require('node:net');const socket=net.connect(4000,'127.0.0.1');socket.setTimeout(3000);socket.once('connect',()=>{socket.end();process.exit(0)});socket.once('error',()=>process.exit(1));socket.once('timeout',()=>{socket.destroy();process.exit(1)})",
         ]
       interval: 5s
       timeout: 4s
       retries: 20
     networks:
       - dealflow
+      - observability
 
   frontend:
     build:
@@ -87,20 +93,20 @@ services:
     networks:
       - observability
 
-  emails:
-    build:
-      context: .
-      dockerfile: emails/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      otel-collector:
-        condition: service_started
-    env_file:
-      - ./emails/.env
-    networks:
-      - observability
+  # emails:
+  #   build:
+  #     context: .
+  #     dockerfile: emails/Dockerfile
+  #   restart: unless-stopped
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     otel-collector:
+  #       condition: service_started
+  #   env_file:
+  #     - ./emails/.env
+  #   networks:
+  #     - observability
 
   night_sky:
     build:

@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  UserRoundCheck,
   X,
 } from 'lucide-react'
 import {
@@ -68,6 +69,17 @@ const navigation = [
       { to: '/reports', label: 'Reports', icon: FileChartColumn },
     ],
   },
+  {
+    label: 'Administration',
+    links: [
+      {
+        to: '/admin/users',
+        label: 'User approvals',
+        icon: UserRoundCheck,
+        roles: ['ADMIN'],
+      },
+    ],
+  },
 ]
 
 const routeTitles = {
@@ -78,6 +90,7 @@ const routeTitles = {
   fulfillment: 'Warehouse fulfillment',
   billing: 'Subscriptions & billing',
   configuration: 'Back-end configuration',
+  admin: 'User administration',
   reports: 'Sales reporting',
 }
 
@@ -97,7 +110,6 @@ function WorkspaceShell({ onLogout }) {
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const section = location.pathname.split('/')[1] || 'dashboard'
-  const [counts, setCount] = useState(0)
 
   function startQuote() {
     const id = createQuote()
@@ -138,22 +150,29 @@ function WorkspaceShell({ onLogout }) {
         </div>
 
         <nav className="workspace-nav" aria-label="Main navigation">
-          {navigation.map((group) => (
-            <div className="workspace-nav__group" key={group.label}>
-              <span>{group.label}</span>
-              {group.links.map(({ to, label, icon: Icon }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) => (isActive ? 'active' : '')}
-                  onClick={() => setMobileNavOpen(false)}
-                >
-                  <Icon size={17} strokeWidth={1.9} />
-                  {label}
-                </NavLink>
-              ))}
-            </div>
-          ))}
+          {navigation.map((group) => {
+            const visibleLinks = group.links.filter(
+              ({ roles }) => !roles || roles.includes(user.role),
+            )
+            if (!visibleLinks.length) return null
+
+            return (
+              <div className="workspace-nav__group" key={group.label}>
+                <span>{group.label}</span>
+                {visibleLinks.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    className={({ isActive }) => (isActive ? 'active' : '')}
+                    onClick={() => setMobileNavOpen(false)}
+                  >
+                    <Icon size={17} strokeWidth={1.9} />
+                    {label}
+                  </NavLink>
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         <div className="workspace-sidebar__actions">
@@ -238,6 +257,14 @@ function WorkspaceShell({ onLogout }) {
               <Route path="/fulfillment" element={<FulfillmentPage />} />
               <Route path="/billing" element={<BillingPage />} />
               <Route path="/configuration" element={<ConfigurationPage />} />
+              <Route
+                path="/admin/users"
+                element={
+                  user.role === 'ADMIN'
+                    ? <ConfigurationPage initialTab="access" />
+                    : <Navigate to="/dashboard" replace />
+                }
+              />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>

@@ -16,6 +16,8 @@ const seedUsers = [
     role: USER_ROLES.ADMIN,
     requestedRole: USER_ROLES.ADMIN,
     status: USER_STATUSES.ACTIVE,
+    is_verified: true,
+    is_deleted: false,
     approval: {
       requestedAt: null,
       reviewedAt: '2026-09-05T00:00:00.000Z',
@@ -31,6 +33,8 @@ const seedUsers = [
     role: USER_ROLES.SALES_REP,
     requestedRole: USER_ROLES.SALES_REP,
     status: USER_STATUSES.ACTIVE,
+    is_verified: true,
+    is_deleted: false,
     approval: {
       requestedAt: '2026-09-04T09:00:00.000Z',
       reviewedAt: '2026-09-04T09:12:00.000Z',
@@ -43,9 +47,11 @@ const seedUsers = [
     fullName: 'Kabir Rao',
     email: 'manager@dealflow360.local',
     password: 'Demo@360',
-    role: USER_ROLES.SALES_MANAGER,
-    requestedRole: USER_ROLES.SALES_MANAGER,
+    role: USER_ROLES.MANAGER,
+    requestedRole: USER_ROLES.MANAGER,
     status: USER_STATUSES.ACTIVE,
+    is_verified: true,
+    is_deleted: false,
     approval: {
       requestedAt: '2026-09-04T09:00:00.000Z',
       reviewedAt: '2026-09-04T09:14:00.000Z',
@@ -58,9 +64,11 @@ const seedUsers = [
     fullName: 'Neha Iyer',
     email: 'finance@dealflow360.local',
     password: 'Demo@360',
-    role: USER_ROLES.FINANCE_OPERATIONS,
-    requestedRole: USER_ROLES.FINANCE_OPERATIONS,
+    role: USER_ROLES.FINANCE,
+    requestedRole: USER_ROLES.FINANCE,
     status: USER_STATUSES.ACTIVE,
+    is_verified: true,
+    is_deleted: false,
     approval: {
       requestedAt: '2026-09-04T09:00:00.000Z',
       reviewedAt: '2026-09-04T09:18:00.000Z',
@@ -113,6 +121,8 @@ function publicUser(user) {
     role: user.role,
     requestedRole: user.requestedRole,
     status: user.status,
+    is_verified: user.is_verified ?? user.status === USER_STATUSES.ACTIVE,
+    is_deleted: Boolean(user.is_deleted),
   }
 }
 
@@ -142,27 +152,32 @@ export const mockAuthApi = {
       throw apiError(400, 'INVALID_ROLE', 'Choose one of the available internal roles.')
     }
 
-    if (users.some((user) => user.email === normalisedEmail)) {
+    const existingUser = users.find((user) => user.email === normalisedEmail)
+    if (existingUser && existingUser.status !== USER_STATUSES.REJECTED) {
       throw apiError(409, 'EMAIL_ALREADY_REGISTERED', 'An account already uses this email.')
     }
 
     const submittedAt = new Date().toISOString()
-    const user = {
-      id: createId('usr'),
+    const resubmitted = Boolean(existingUser)
+    const user = existingUser ?? { id: createId('usr') }
+
+    Object.assign(user, {
       fullName: String(fullName).trim(),
       email: normalisedEmail,
       password,
       role: null,
       requestedRole,
       status: USER_STATUSES.PENDING_APPROVAL,
+      is_verified: false,
+      is_deleted: false,
       approval: {
         requestedAt: submittedAt,
         reviewedAt: null,
         reviewedByUserId: null,
         reason: null,
       },
-    }
-    users.push(user)
+    })
+    if (!existingUser) users.push(user)
     writeUsers(users)
 
     return {
@@ -170,13 +185,17 @@ export const mockAuthApi = {
         id: user.id,
         status: user.status,
         requestedRole: user.requestedRole,
+        is_verified: false,
         submittedAt,
+        resubmitted,
         applicant: {
           fullName: user.fullName,
           email: user.email,
         },
       },
-      message: 'Your access request has been sent to an administrator.',
+      message: resubmitted
+        ? 'Your new access request has been sent to an administrator.'
+        : 'Your access request has been sent to an administrator.',
     }
   },
 
@@ -210,11 +229,28 @@ export const mockAuthApi = {
         403,
         'ACCOUNT_REJECTED',
         user.approval.reason || 'This access request was not approved.',
+        {
+          reason: user.approval.reason || 'This access request was not approved.',
+          reviewedAt: user.approval.reviewedAt,
+          requestedRole: user.requestedRole,
+          applicant: {
+            fullName: user.fullName,
+            email: user.email,
+          },
+        },
       )
     }
 
     if (user.status !== USER_STATUSES.ACTIVE) {
       throw apiError(403, 'ACCOUNT_SUSPENDED', 'This account is currently unavailable.')
+    }
+
+    if (user.is_verified === false) {
+      throw apiError(
+        403,
+        'ACCOUNT_NOT_VERIFIED',
+        'This account has not been verified by an administrator.',
+      )
     }
 
     activeUserId = user.id
@@ -234,6 +270,13 @@ export const mockAuthApi = {
       : { authenticated: false, user: null }
   },
 
+  async forgotPassword() {
+    await wait()
+    return {
+      message: 'If an account exists for that email, the password reset request has been accepted.',
+    }
+  },
+
   async logout() {
     await wait()
     activeUserId = null
@@ -248,15 +291,45 @@ export const mockAuthApi = {
     }
   },
 
+  async approveUser(userId) {
+    await wait()
+    const users = readUsers()
+    const user = users.find((candidate) => candidate.id === userId)
+
+    if (!user) throw apiError(404, 'REQUEST_NOT_FOUND', 'Registration request not found.')
+    if (user.status !== USER_STATUSES.PENDING_APPROVAL) {
+      throw apiError(409, 'REQUEST_ALREADY_REVIEWED', 'This registration request was already reviewed.')
+    }
+
+    user.status = USER_STATUSES.ACTIVE
+    user.role = user.requestedRole
+    user.is_verified = true
+    user.is_deleted = false
+    user.approval = {
+      ...user.approval,
+      reviewedAt: new Date().toISOString(),
+      reviewedByUserId: 'usr_admin_demo',
+      reason: null,
+    }
+    writeUsers(users)
+
+    return { user: registrationUser(user) }
+  },
+
   async reviewRegistration(requestId, { decision, reason }) {
     await wait()
     const users = readUsers()
     const user = users.find((candidate) => candidate.id === requestId)
     if (!user) throw apiError(404, 'REQUEST_NOT_FOUND', 'Registration request not found.')
+    if (user.status !== USER_STATUSES.PENDING_APPROVAL) {
+      throw apiError(409, 'REQUEST_ALREADY_REVIEWED', 'This registration request was already reviewed.')
+    }
 
     user.status =
       decision === 'APPROVE' ? USER_STATUSES.ACTIVE : USER_STATUSES.REJECTED
     user.role = decision === 'APPROVE' ? user.requestedRole : null
+    user.is_verified = decision === 'APPROVE'
+    user.is_deleted = decision === 'REJECT'
     user.approval = {
       ...user.approval,
       reviewedAt: new Date().toISOString(),
@@ -265,6 +338,33 @@ export const mockAuthApi = {
     }
     writeUsers(users)
     return { user: registrationUser(user) }
+  },
+
+  async createTierDiscount({ tier, discount }) {
+    await wait()
+    return {
+      tier_discount: {
+        id: createId('tier'),
+        tier,
+        discount,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    }
+  },
+
+  async createCategoryDiscount({ hardware, service, subscription }) {
+    await wait()
+    return {
+      category_discount: {
+        id: createId('category'),
+        hardware,
+        service,
+        subscription,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    }
   },
 }
 

@@ -5,6 +5,7 @@
     "api-gateway",
     "emails",
     "frontend",
+    "models",
     "night_sky",
     "observability"
   ],

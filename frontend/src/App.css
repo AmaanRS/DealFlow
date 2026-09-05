@@ -838,6 +838,12 @@
   background: rgba(86, 211, 155, 0.09);
 }
 
+.state-icon--danger {
+  border-color: rgba(255, 116, 133, 0.28);
+  color: #ff8f9d;
+  background: rgba(255, 116, 133, 0.09);
+}
+
 .state-icon svg {
   width: 25px;
   fill: none;
@@ -849,6 +855,10 @@
 
 .state-eyebrow--success {
   color: var(--green);
+}
+
+.state-eyebrow--danger {
+  color: #ff8f9d;
 }
 
 .state-copy {
@@ -911,6 +921,11 @@
   background: rgba(86, 211, 155, 0.065);
 }
 
+.notice--danger {
+  border-color: rgba(255, 116, 133, 0.2);
+  background: rgba(255, 116, 133, 0.07);
+}
+
 .notice > span {
   display: grid;
   width: 17px;
@@ -928,8 +943,33 @@
   background: var(--green);
 }
 
+.notice--danger > span {
+  color: #26070c;
+  background: #ff8f9d;
+}
+
 .notice p {
   margin: 0;
+}
+
+.notice p strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-soft);
+}
+
+.resubmission-notice {
+  margin-bottom: 0;
+}
+
+.resubmission-notice small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.state-actions .text-button {
+  margin-top: 15px;
 }
 
 .profile-summary {

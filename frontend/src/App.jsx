@@ -5,6 +5,7 @@ import {
   INTERNAL_ROLE_OPTIONS,
   USER_ROLES,
 } from './contracts/auth.js'
+import forgotIllustration from './illustrations/forgot.svg'
 import loginIllustration from './illustrations/login.svg'
 import signupIllustration from './illustrations/signup.svg'
 import verifyIllustration from './illustrations/verify.svg'
@@ -54,6 +55,14 @@ function StatusIcon({ type }) {
     )
   }
 
+  if (type === 'rejected') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m8 8 8 8M16 8l-8 8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    )
+  }
+
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -63,9 +72,12 @@ function StatusIcon({ type }) {
 
 function AuthAside({ mode, state }) {
   const pending = state === 'pending'
+  const rejected = state === 'rejected'
   const authenticated = state === 'authenticated'
-  const illustration = pending
+  const illustration = pending || rejected
     ? verifyIllustration
+    : mode === 'forgot'
+      ? forgotIllustration
     : mode === 'register'
       ? signupIllustration
       : loginIllustration
@@ -81,6 +93,10 @@ function AuthAside({ mode, state }) {
         <h2>
           {pending
             ? 'Your workspace request is moving.'
+            : rejected
+              ? 'Your administrator left feedback.'
+            : mode === 'forgot'
+              ? 'Recover access without exposing your account.'
             : authenticated
               ? 'Access granted. Deals are waiting.'
               : 'Move every deal forward with confidence.'}
@@ -174,6 +190,83 @@ function PendingApproval({ request, onBack }) {
   )
 }
 
+function RejectedAccess({ rejection, onBack, onRegisterAgain }) {
+  const reviewedAt = rejection.reviewedAt
+    ? new Intl.DateTimeFormat('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(new Date(rejection.reviewedAt))
+    : 'Recently'
+
+  return (
+    <div className="state-panel">
+      <span className="state-icon state-icon--danger">
+        <StatusIcon type="rejected" />
+      </span>
+      <span className="state-eyebrow state-eyebrow--danger">Access rejected</span>
+      <h1>Your workspace request was not approved.</h1>
+      <p className="state-copy">
+        Review the administrator feedback below before contacting your organization.
+      </p>
+
+      <dl className="request-summary">
+        <div>
+          <dt>Account</dt>
+          <dd>{rejection.email}</dd>
+        </div>
+        <div>
+          <dt>Reviewed</dt>
+          <dd>{reviewedAt}</dd>
+        </div>
+      </dl>
+
+      <div className="notice notice--danger">
+        <span aria-hidden="true">!</span>
+        <p><strong>Administrator reason</strong>{rejection.reason}</p>
+      </div>
+
+      <div className="state-actions">
+        <button className="primary-button" type="button" onClick={onRegisterAgain}>
+          Register again
+        </button>
+        <button className="text-button" type="button" onClick={onBack}>
+          Back to sign in
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PasswordResetRequested({ email, message, onBack }) {
+  return (
+    <div className="state-panel">
+      <span className="state-icon state-icon--success">
+        <StatusIcon type="success" />
+      </span>
+      <span className="state-eyebrow">Request accepted</span>
+      <h1>Password reset request accepted.</h1>
+      <p className="state-copy">{message}</p>
+
+      <dl className="request-summary">
+        <div>
+          <dt>Email address</dt>
+          <dd>{email}</dd>
+        </div>
+      </dl>
+
+      <div className="notice notice--info">
+        <span aria-hidden="true">i</span>
+        <p>For security, we show the same result whether or not the account exists.</p>
+      </div>
+
+      <button className="primary-button" type="button" onClick={onBack}>
+        Back to sign in
+      </button>
+    </div>
+  )
+}
+
 function InternalAuth() {
   const [mode, setMode] = useState('login')
   const [loginForm, setLoginForm] = useState(emptyLogin)
@@ -182,6 +275,10 @@ function InternalAuth() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [pendingRequest, setPendingRequest] = useState(null)
+  const [rejectedRequest, setRejectedRequest] = useState(null)
+  const [resubmissionContext, setResubmissionContext] = useState(null)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotResult, setForgotResult] = useState(null)
   const [sessionUser, setSessionUser] = useState(null)
 
   useEffect(() => {
@@ -202,12 +299,22 @@ function InternalAuth() {
 
   const pageState = pendingRequest
     ? 'pending'
+    : rejectedRequest
+      ? 'rejected'
+    : forgotResult
+      ? 'reset-requested'
     : sessionUser
       ? 'authenticated'
       : 'form'
 
   function switchMode(nextMode) {
+    if (nextMode === 'forgot' && !forgotEmail) {
+      setForgotEmail(loginForm.email)
+    }
     setMode(nextMode)
+    setForgotResult(null)
+    setRejectedRequest(null)
+    setResubmissionContext(null)
     setError('')
     setPasswordVisible(false)
   }
@@ -234,6 +341,12 @@ function InternalAuth() {
     setBusy(true)
 
     try {
+      if (mode === 'forgot') {
+        const result = await authApi.forgotPassword({ email: forgotEmail })
+        setForgotResult({ email: forgotEmail, message: result.message })
+        return
+      }
+
       if (mode === 'login') {
         const result = await authApi.login(loginForm)
         setSessionUser(result.user)
@@ -251,6 +364,7 @@ function InternalAuth() {
         password: registrationForm.password,
         requestedRole: registrationForm.requestedRole,
       })
+      setResubmissionContext(null)
       setPendingRequest(result.request)
     } catch (requestError) {
       if (
@@ -258,6 +372,14 @@ function InternalAuth() {
         requestError.details
       ) {
         setPendingRequest(requestError.details)
+      } else if (requestError.code === 'ACCOUNT_REJECTED') {
+        setRejectedRequest({
+          email: loginForm.email,
+          reason: requestError.details?.reason ?? requestError.message,
+          reviewedAt: requestError.details?.reviewedAt ?? null,
+          requestedRole: requestError.details?.requestedRole,
+          fullName: requestError.details?.applicant?.fullName,
+        })
       } else {
         setError(requestError.message ?? 'Something went wrong. Please try again.')
       }
@@ -274,11 +396,41 @@ function InternalAuth() {
   }
 
   function backToLogin() {
-    const email = pendingRequest?.applicant?.email ?? registrationForm.email
+    const email =
+      pendingRequest?.applicant?.email ??
+      rejectedRequest?.email ??
+      forgotResult?.email ??
+      registrationForm.email
     setPendingRequest(null)
+    setRejectedRequest(null)
+    setResubmissionContext(null)
+    setForgotResult(null)
     setMode('login')
     setLoginForm((current) => ({ ...current, email, password: '' }))
     setError('')
+  }
+
+  function registerAgain() {
+    const requestedRole = INTERNAL_ROLE_OPTIONS.some(
+      (role) => role.value === rejectedRequest?.requestedRole,
+    )
+      ? rejectedRequest.requestedRole
+      : USER_ROLES.SALES_REP
+
+    setRegistrationForm({
+      ...emptyRegistration,
+      fullName: rejectedRequest?.fullName ?? '',
+      email: rejectedRequest?.email ?? '',
+      requestedRole,
+    })
+    setResubmissionContext({
+      reason: rejectedRequest?.reason,
+      reviewedAt: rejectedRequest?.reviewedAt,
+    })
+    setRejectedRequest(null)
+    setMode('register')
+    setError('')
+    setPasswordVisible(false)
   }
 
   if (sessionUser) {
@@ -300,46 +452,89 @@ function InternalAuth() {
           <div className="form-stage">
             {pendingRequest ? (
               <PendingApproval request={pendingRequest} onBack={backToLogin} />
+            ) : rejectedRequest ? (
+              <RejectedAccess
+                rejection={rejectedRequest}
+                onBack={backToLogin}
+                onRegisterAgain={registerAgain}
+              />
+            ) : forgotResult ? (
+              <PasswordResetRequested
+                email={forgotResult.email}
+                message={forgotResult.message}
+                onBack={backToLogin}
+              />
             ) : (
               <div className="form-panel">
-                <div className="auth-tabs" role="tablist" aria-label="Authentication">
+                {mode === 'forgot' ? (
                   <button
-                    className={mode === 'login' ? 'active' : ''}
+                    className="text-button"
                     type="button"
-                    role="tab"
-                    aria-selected={mode === 'login'}
                     onClick={() => switchMode('login')}
                   >
-                    Sign in
+                    ← Back to sign in
                   </button>
-                  <button
-                    className={mode === 'register' ? 'active' : ''}
-                    type="button"
-                    role="tab"
-                    aria-selected={mode === 'register'}
-                    onClick={() => switchMode('register')}
-                  >
-                    Request access
-                  </button>
-                </div>
+                ) : (
+                  <div className="auth-tabs" role="tablist" aria-label="Authentication">
+                    <button
+                      className={mode === 'login' ? 'active' : ''}
+                      type="button"
+                      role="tab"
+                      aria-selected={mode === 'login'}
+                      onClick={() => switchMode('login')}
+                    >
+                      Sign in
+                    </button>
+                    <button
+                      className={mode === 'register' ? 'active' : ''}
+                      type="button"
+                      role="tab"
+                      aria-selected={mode === 'register'}
+                      onClick={() => switchMode('register')}
+                    >
+                      Request access
+                    </button>
+                  </div>
+                )}
 
                 <div className="form-heading">
                   <span className="form-eyebrow">
-                    {mode === 'login' ? 'Welcome back' : 'Join your sales team'}
+                    {mode === 'login'
+                      ? 'Welcome back'
+                      : mode === 'forgot'
+                        ? 'Account recovery'
+                        : 'Join your sales team'}
                   </span>
                   <h1>
                     {mode === 'login'
                       ? 'Sign in to move deals forward.'
-                      : 'Request your workspace role.'}
+                      : mode === 'forgot'
+                        ? 'Reset your password securely.'
+                        : 'Request your workspace role.'}
                   </h1>
                   <p>
                     {mode === 'login'
                       ? 'Use the account approved by your DealFlow360 administrator.'
-                      : 'An administrator reviews every internal account before access is granted.'}
+                      : mode === 'forgot'
+                        ? 'Enter your work email and we will accept a password reset request without revealing whether the account exists.'
+                        : 'An administrator reviews every internal account before access is granted.'}
                   </p>
                 </div>
 
                 <form className="auth-form" onSubmit={handleSubmit}>
+                  {mode === 'register' && resubmissionContext && (
+                    <div className="notice notice--danger resubmission-notice">
+                      <span aria-hidden="true">!</span>
+                      <p>
+                        <strong>Previous administrator feedback</strong>
+                        {resubmissionContext.reason}
+                        <small>
+                          Update your details below to submit a new request.
+                        </small>
+                      </p>
+                    </div>
+                  )}
+
                   {mode === 'register' && (
                     <label className="field">
                       <span>Full name</span>
@@ -359,40 +554,54 @@ function InternalAuth() {
                     <input
                       name="email"
                       type="email"
-                      value={mode === 'login' ? loginForm.email : registrationForm.email}
-                      onChange={mode === 'login' ? updateLogin : updateRegistration}
+                      value={
+                        mode === 'login'
+                          ? loginForm.email
+                          : mode === 'forgot'
+                            ? forgotEmail
+                            : registrationForm.email
+                      }
+                      onChange={
+                        mode === 'login'
+                          ? updateLogin
+                          : mode === 'forgot'
+                            ? (event) => setForgotEmail(event.target.value)
+                            : updateRegistration
+                      }
                       autoComplete="email"
                       placeholder="name@company.com"
                       required
                     />
                   </label>
 
-                  <label className="field">
-                    <span>Password</span>
-                    <span className="password-field">
-                      <input
-                        name="password"
-                        type={passwordVisible ? 'text' : 'password'}
-                        value={
-                          mode === 'login'
-                            ? loginForm.password
-                            : registrationForm.password
-                        }
-                        onChange={mode === 'login' ? updateLogin : updateRegistration}
-                        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                        placeholder={mode === 'login' ? 'Enter your password' : 'At least 8 characters'}
-                        minLength={8}
-                        required
-                      />
-                      <button
-                        type="button"
-                        aria-label={passwordVisible ? 'Hide password' : 'Show password'}
-                        onClick={() => setPasswordVisible((visible) => !visible)}
-                      >
-                        <EyeIcon visible={passwordVisible} />
-                      </button>
-                    </span>
-                  </label>
+                  {mode !== 'forgot' && (
+                    <label className="field">
+                      <span>Password</span>
+                      <span className="password-field">
+                        <input
+                          name="password"
+                          type={passwordVisible ? 'text' : 'password'}
+                          value={
+                            mode === 'login'
+                              ? loginForm.password
+                              : registrationForm.password
+                          }
+                          onChange={mode === 'login' ? updateLogin : updateRegistration}
+                          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                          placeholder={mode === 'login' ? 'Enter your password' : 'At least 8 characters'}
+                          minLength={8}
+                          required
+                        />
+                        <button
+                          type="button"
+                          aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                          onClick={() => setPasswordVisible((visible) => !visible)}
+                        >
+                          <EyeIcon visible={passwordVisible} />
+                        </button>
+                      </span>
+                    </label>
+                  )}
 
                   {mode === 'register' && (
                     <>
@@ -453,6 +662,13 @@ function InternalAuth() {
                         <span />
                         Keep me signed in
                       </label>
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() => switchMode('forgot')}
+                      >
+                        Forgot password?
+                      </button>
                     </div>
                   )}
 
@@ -477,10 +693,14 @@ function InternalAuth() {
                     {busy
                       ? mode === 'login'
                         ? 'Checking access…'
-                        : 'Sending request…'
+                        : mode === 'forgot'
+                          ? 'Submitting request…'
+                          : 'Sending request…'
                       : mode === 'login'
                         ? 'Sign in securely'
-                        : 'Submit access request'}
+                        : mode === 'forgot'
+                          ? 'Request password reset'
+                          : 'Submit access request'}
                   </button>
                 </form>
               </div>

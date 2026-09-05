@@ -1,8 +1,8 @@
 export const USER_ROLES = Object.freeze({
   ADMIN: 'ADMIN',
   SALES_REP: 'SALES_REP',
-  SALES_MANAGER: 'SALES_MANAGER',
-  FINANCE_OPERATIONS: 'FINANCE_OPERATIONS',
+  MANAGER: 'MANAGER',
+  FINANCE: 'FINANCE',
 })
 
 export const USER_STATUSES = Object.freeze({
@@ -20,13 +20,13 @@ export const INTERNAL_ROLE_OPTIONS = Object.freeze([
     description: 'Build quotations, manage customers and submit deals for approval.',
   },
   {
-    value: USER_ROLES.SALES_MANAGER,
+    value: USER_ROLES.MANAGER,
     label: 'Sales manager',
     shortLabel: 'Manager',
     description: 'Review discount exceptions and monitor deal health.',
   },
   {
-    value: USER_ROLES.FINANCE_OPERATIONS,
+    value: USER_ROLES.FINANCE,
     label: 'Finance & operations',
     shortLabel: 'Finance',
     description: 'Review high-risk deals, billing and fulfilment decisions.',
@@ -34,13 +34,17 @@ export const INTERNAL_ROLE_OPTIONS = Object.freeze([
 ])
 
 export const AUTH_ENDPOINTS = Object.freeze({
-  register: '/api/v1/auth/registrations',
-  login: '/api/v1/auth/login',
-  me: '/api/v1/auth/me',
-  logout: '/api/v1/auth/logout',
-  registrationRequests: '/api/v1/admin/registration-requests',
+  register: '/v1/api/user/auth/signup',
+  login: '/v1/api/user/auth/login',
+  forgotPassword: '/v1/api/user/auth/forgot_password',
+  me: '/v1/api/user/auth/me',
+  logout: '/v1/api/user/auth/logout',
+  registrationRequests: '/v1/api/admin/registration-requests',
+  approveUser: '/v1/api/admin/approve_user',
   registrationDecision: (requestId) =>
-    `/api/v1/admin/registration-requests/${encodeURIComponent(requestId)}`,
+    `/v1/api/admin/registration-requests/${encodeURIComponent(requestId)}`,
+  createTierDiscount: '/v1/api/admin/create_tier_discount',
+  createCategoryDiscount: '/v1/api/admin/create_category_discount',
   portalSession: '/api/v1/portal/session',
   portalLogout: '/api/v1/portal/logout',
   portalInvitations: '/api/v1/portal/invitations',

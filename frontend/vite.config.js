@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
+        '/v1/api': {
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:9080',
+          changeOrigin: true,
+        },
         '/api': {
           target: env.VITE_API_PROXY_TARGET || 'http://localhost:9080',
           changeOrigin: true,

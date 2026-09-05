@@ -11,6 +11,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@app/models": "^1.0.0",
     "@app/observability": "^1.0.0",
     "convict": "^6.2.5",
     "express": "^5.2.1",

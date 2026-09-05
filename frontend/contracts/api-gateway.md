@@ -11,10 +11,10 @@ This is the frontend/API gateway handoff contract. The frontend already uses the
 
 1. The initial administrator is created from a server-side seed or deployment secret. An administrator account cannot be requested through public registration.
 2. Registration sends a `requestedRole`; it does not grant that role.
-3. A pending user has `role: null` and `status: "PENDING_APPROVAL"`.
+3. A pending user has `role: null`, `status: "PENDING_APPROVAL"`, and `is_verified: false`.
 4. Only an active administrator can approve or reject registrations.
-5. Approval atomically sets `role = requestedRole`, `status = "ACTIVE"`, and reviewer metadata.
-6. Rejection leaves `role: null` and sets `status = "REJECTED"`.
+5. Approval atomically sets `role = requestedRole`, `status = "ACTIVE"`, `is_verified = true`, and reviewer metadata.
+6. Rejection leaves `role: null`, sets `is_verified: false`, `is_deleted: true`, and `status = "REJECTED"`. The record is retained for audit and for returning the administrator's reason to that user.
 7. Pending, rejected, and suspended users never receive an authenticated session.
 8. Store only a strong password hash (Argon2id or bcrypt), never the original password.
 9. Send authentication in a Secure, HttpOnly cookie. Do not return a bearer token for local storage.
@@ -24,10 +24,10 @@ This is the frontend/API gateway handoff contract. The frontend already uses the
 Roles:
 
 ```json
-["ADMIN", "SALES_REP", "SALES_MANAGER", "FINANCE_OPERATIONS"]
+["ADMIN", "SALES_REP", "MANAGER", "FINANCE", "CUSTOMER"]
 ```
 
-Only the final three values are valid during public registration.
+Only the final four values are valid during public registration.
 
 Statuses:
 
@@ -72,10 +72,11 @@ Success: `202 Accepted`
 ```json
 {
   "request": {
-    "id": "usr_01J7W9R2K9PX2",
+    "id": "66dbe7b91f384dce27a4f101",
     "status": "PENDING_APPROVAL",
     "requestedRole": "SALES_REP",
     "submittedAt": "2026-09-05T10:30:00.000Z",
+    "resubmitted": false,
     "applicant": {
       "fullName": "Aanya Patel",
       "email": "aanya@company.com"
@@ -89,10 +90,15 @@ Expected errors:
 
 - `400 VALIDATION_ERROR` with `fields` for invalid name, email, or password.
 - `400 INVALID_ROLE` for a non-requestable role, including `ADMIN`.
-- `409 EMAIL_ALREADY_REGISTERED` when the normalized email already exists.
+- `409 EMAIL_ALREADY_REGISTERED` when the normalized email belongs to an active,
+  pending, or suspended account.
 - `429 RATE_LIMITED` when attempts exceed the gateway/application limit.
 
-Trim and lowercase emails before the unique check. Create the user and approval metadata in one database write.
+Trim and lowercase emails before the unique check. A rejected user may submit this
+request again with the same email. Re-registration reuses the soft-deleted user
+document, updates the submitted identity data and password, clears `is_deleted`, and
+moves the account back to `PENDING_APPROVAL`. The previous rejection remains in the
+audit-event collection.
 
 ### Sign in
 
@@ -113,11 +119,12 @@ Success: `200 OK`
 ```json
 {
   "user": {
-    "id": "usr_01J7W9R2K9PX2",
+    "id": "66dbe7b91f384dce27a4f101",
     "fullName": "Aanya Patel",
     "email": "aanya@company.com",
     "role": "SALES_REP",
-    "status": "ACTIVE"
+    "status": "ACTIVE",
+    "is_verified": true
   },
   "session": {
     "expiresAt": "2026-09-12T10:30:00.000Z"
@@ -149,7 +156,7 @@ Pending account: `403 Forbidden`
   "code": "ACCOUNT_PENDING_APPROVAL",
   "message": "Your access request is still waiting for administrator approval.",
   "details": {
-    "requestId": "usr_01J7W9R2K9PX2",
+    "requestId": "66dbe7b91f384dce27a4f101",
     "requestedRole": "SALES_REP",
     "submittedAt": "2026-09-05T10:30:00.000Z",
     "applicant": {
@@ -160,7 +167,25 @@ Pending account: `403 Forbidden`
 }
 ```
 
-Other `403` codes are `ACCOUNT_REJECTED` and `ACCOUNT_SUSPENDED`. Rate-limit attempts by both IP and normalized email.
+A rejected account receives `ACCOUNT_REJECTED` with the administrator's stored reason:
+
+```json
+{
+  "code": "ACCOUNT_REJECTED",
+  "message": "The User record is not verified Yet",
+  "details": {
+    "reason": "The User record is not verified Yet",
+    "reviewedAt": "2026-09-05T10:42:00.000Z",
+    "requestedRole": "SALES_REP",
+    "applicant": {
+      "fullName": "Aanya Patel",
+      "email": "aanya@company.com"
+    }
+  }
+}
+```
+
+Other `403` codes include `ACCOUNT_SUSPENDED`. Rate-limit attempts by both IP and normalized email.
 
 ### Read the current user
 
@@ -172,11 +197,12 @@ Authenticated response: `200 OK`
 {
   "authenticated": true,
   "user": {
-    "id": "usr_01J7W9R2K9PX2",
+    "id": "66dbe7b91f384dce27a4f101",
     "fullName": "Aanya Patel",
     "email": "aanya@company.com",
     "role": "SALES_REP",
-    "status": "ACTIVE"
+    "status": "ACTIVE",
+    "is_verified": true
   }
 }
 ```
@@ -202,11 +228,11 @@ For cookie authentication, protect state-changing endpoints against CSRF. SameSi
 
 ## 4. Administrator endpoints
 
-Both endpoints require an authenticated `ADMIN`. Return `401` for no session and `403 FORBIDDEN` for an authenticated non-admin.
+All administrator endpoints below require an authenticated `ADMIN`. Return `401` for no session and `403 FORBIDDEN` for an authenticated non-admin.
 
 ### List registration requests
 
-`GET /api/v1/admin/registration-requests?status=PENDING_APPROVAL`
+`GET /v1/api/admin/registration-requests?status=PENDING_APPROVAL`
 
 Success: `200 OK`
 
@@ -214,12 +240,13 @@ Success: `200 OK`
 {
   "items": [
     {
-      "id": "usr_01J7W9R2K9PX2",
+      "id": "66dbe7b91f384dce27a4f101",
       "fullName": "Aanya Patel",
       "email": "aanya@company.com",
       "role": null,
       "requestedRole": "SALES_REP",
       "status": "PENDING_APPROVAL",
+      "is_verified": false,
       "approval": {
         "requestedAt": "2026-09-05T10:30:00.000Z",
         "reviewedAt": null,
@@ -237,24 +264,55 @@ Success: `200 OK`
 
 The first hackathon version may omit cursor pagination, but must keep the `items` array.
 
-### Approve or reject a request
+### Approve a user
 
-`PATCH /api/v1/admin/registration-requests/:requestId`
+`POST /v1/api/admin/approve_user`
 
-Approve:
+Request:
 
 ```json
 {
-  "decision": "APPROVE"
+  "userId": "66dbe7b91f384dce27a4f101"
 }
 ```
 
-Reject:
+Approval sets the requested role, activates the account, and marks the user as verified in one atomic operation.
+
+Success: `200 OK`
+
+```json
+{
+  "user": {
+    "id": "66dbe7b91f384dce27a4f101",
+    "fullName": "Aanya Patel",
+    "email": "aanya@company.com",
+    "role": "SALES_REP",
+    "requestedRole": "SALES_REP",
+    "status": "ACTIVE",
+    "is_verified": true,
+    "is_deleted": false,
+    "approval": {
+      "requestedAt": "2026-09-05T10:30:00.000Z",
+      "reviewedAt": "2026-09-05T10:42:00.000Z",
+      "reviewedByUserId": "66dbe7b91f384dce27a4f001",
+      "reason": null
+    }
+  }
+}
+```
+
+### Reject a request (compatibility endpoint)
+
+`PATCH /v1/api/admin/registration-requests/:requestId`
+
+The administrator must enter the reason that will be shown to the rejected user.
+
+Request:
 
 ```json
 {
   "decision": "REJECT",
-  "reason": "The employee record could not be verified."
+  "reason": "The User record is not verified Yet"
 }
 ```
 
@@ -263,23 +321,25 @@ Success: `200 OK`
 ```json
 {
   "user": {
-    "id": "usr_01J7W9R2K9PX2",
+    "id": "66dbe7b91f384dce27a4f101",
     "fullName": "Aanya Patel",
     "email": "aanya@company.com",
-    "role": "SALES_REP",
+    "role": null,
     "requestedRole": "SALES_REP",
-    "status": "ACTIVE",
+    "status": "REJECTED",
+    "is_verified": false,
+    "is_deleted": true,
     "approval": {
       "requestedAt": "2026-09-05T10:30:00.000Z",
       "reviewedAt": "2026-09-05T10:42:00.000Z",
-      "reviewedByUserId": "usr_admin_seed",
-      "reason": null
+      "reviewedByUserId": "66dbe7b91f384dce27a4f001",
+      "reason": "The User record is not verified Yet"
     }
   }
 }
 ```
 
-Expected errors are `400 INVALID_DECISION`, `404 REQUEST_NOT_FOUND`, and `409 REQUEST_ALREADY_REVIEWED`. Make this update atomic: filter by both ID and `status: "PENDING_APPROVAL"` so two admin clicks cannot review the same request. Record an audit event in the same transaction when supported.
+Expected errors are `400 INVALID_DECISION`, `404 REQUEST_NOT_FOUND`, and `409 REQUEST_ALREADY_REVIEWED`. Both approval and rejection must filter by `status: "PENDING_APPROVAL"` so two admin clicks cannot review the same request. Record an audit event in the same transaction when supported.
 
 ## 5. Customer portal endpoints
 
@@ -321,7 +381,7 @@ The raw token is accepted from the URL fragment (`/portal#token=...`) and is rem
 
 ### Create a quotation invitation
 
-`POST /api/v1/portal/invitations` requires an active internal `ADMIN`, `SALES_REP`, or `SALES_MANAGER` session.
+`POST /api/v1/portal/invitations` requires an active internal `ADMIN`, `SALES_REP`, or `MANAGER` session.
 
 ```json
 {
@@ -366,9 +426,11 @@ Keep bounded user-owned authentication/profile fields together:
   email: String,
   emailLower: String, // unique index
   passwordHash: String,
-  role: null | "ADMIN" | "SALES_REP" | "SALES_MANAGER" | "FINANCE_OPERATIONS",
-  requestedRole: "ADMIN" | "SALES_REP" | "SALES_MANAGER" | "FINANCE_OPERATIONS",
+  role: null | "ADMIN" | "SALES_REP" | "MANAGER" | "FINANCE" | "CUSTOMER",
+  requestedRole: "ADMIN" | "SALES_REP" | "MANAGER" | "FINANCE" | "CUSTOMER",
   status: "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED",
+  is_verified: Boolean,
+  is_deleted: Boolean, // true means soft deleted; the document is retained
   approval: {
     requestedAt: Date | null,
     reviewedAt: Date | null,

@@ -1,0 +1,25 @@
+export const USER_ROLES = Object.freeze({
+  ADMIN: 'ADMIN',
+  SALES_REP: 'SALES_REP',
+  MANAGER: 'MANAGER',
+  FINANCE: 'FINANCE',
+  CUSTOMER: 'CUSTOMER',
+})
+
+export const USER_STATUSES = Object.freeze({
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  ACTIVE: 'ACTIVE',
+  REJECTED: 'REJECTED',
+  SUSPENDED: 'SUSPENDED',
+})
+
+export const SESSION_KINDS = Object.freeze({
+  INTERNAL: 'INTERNAL',
+  CUSTOMER_PORTAL: 'CUSTOMER_PORTAL',
+})
+
+export const ITEM_CATEGORIES = Object.freeze([
+  'HARDWARE',
+  'SERVICES',
+  'SUBSCRIPTION',
+])
