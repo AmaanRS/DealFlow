@@ -12,6 +12,8 @@ import {
   SubscriptionRevisionHistory,
 } from "../models.js";
 import {
+  applyCreationRiskWorkflow,
+  normalizeQuoteInput,
   QUOTE_INPUT_FIELDS,
   priceQuotation,
   quoteIntentFromSnapshot,
@@ -210,50 +212,6 @@ function parseFilterObject(query) {
 
   if (filter.is_latest_quote === undefined) filter.is_latest_quote = true;
   return filter;
-}
-
-function normalizeQuoteInput(input) {
-  const normalized = { ...input };
-  const effectiveStatus = normalized.status ?? "DRAFT";
-  const effectiveRisk = normalized.risk ?? "LOW";
-
-  if (
-    effectiveStatus === "APPROVED" &&
-    effectiveRisk === "LOW" &&
-    (normalized.approved_by === undefined || normalized.approved_by === null ||
-      normalized.approved_by === "")
-  ) {
-    normalized.approved_by = AUTO_APPROVER;
-  }
-
-  if (
-    effectiveStatus === "APPROVED" &&
-    effectiveRisk !== "LOW" &&
-    (!normalized.approved_by || normalized.approved_by === AUTO_APPROVER)
-  ) {
-    throw new ApiError(
-      400,
-      "APPROVER_REQUIRED",
-      "MEDIUM and HIGH risk approved quotations require an approver email",
-    );
-  }
-
-  return normalized;
-}
-
-export function applyCreationRiskWorkflow(pricedQuotation) {
-  const isDraft = pricedQuotation.status === "DRAFT";
-  const isLowRisk = pricedQuotation.risk === "LOW";
-  let status = "PENDING_APPROVAL";
-
-  if (isDraft) status = "DRAFT";
-  else if (isLowRisk) status = "APPROVED";
-
-  return normalizeQuoteInput({
-    ...pricedQuotation,
-    status,
-    approved_by: !isDraft && isLowRisk ? AUTO_APPROVER : null,
-  });
 }
 
 async function releaseInventoryReservations(reservations) {
@@ -811,7 +769,11 @@ export async function updateQuotation(req, res) {
     risk_evaluation: riskEvaluation,
     ...pricedNextValues
   } = await priceQuotation(nextIntent, { inventoryCredits });
-  const nextValues = normalizeQuoteInput(pricedNextValues);
+  const nextValues = ["DRAFT", "PENDING_APPROVAL"].includes(
+    nextIntent.status,
+  )
+    ? applyCreationRiskWorkflow(pricedNextValues)
+    : normalizeQuoteInput(pricedNextValues);
 
   const acquired = await Quote.updateOne(
     { _id: currentQuote._id, is_latest_quote: true },

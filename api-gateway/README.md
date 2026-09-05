@@ -66,8 +66,11 @@ The canonical API base path is `/v1/api`.
 - `POST /v1/api/user/auth/forgot_password`
 - `GET /v1/api/user/auth/me`
 - `POST /v1/api/user/auth/logout`
-- `POST /v1/api/admin/create_tier_discount` - admin only
-- `POST /v1/api/admin/create_category_discount` - admin only
+- `POST /v1/api/admin/create_tier_discount` - admin or manager
+- `POST /v1/api/admin/create_category_discount` - admin or manager
+- `GET /v1/api/admin/discount_policy` - admin or manager
+- `PATCH /v1/api/admin/tier_discount` - admin or manager
+- `PATCH /v1/api/admin/category_discount` - admin or manager
 - `GET /v1/api/admin/users` - admin only
 - `GET /v1/api/admin/registration-requests?status=PENDING_APPROVAL`
 - `POST /v1/api/admin/approve_user` with `{ "userId": "..." }`

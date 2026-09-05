@@ -83,8 +83,37 @@ const realAuthApi = {
     })
   },
 
+  getDiscountPolicy() {
+    return request(AUTH_ENDPOINTS.discountPolicy)
+  },
+
+  updateTierDiscount(payload) {
+    return request(AUTH_ENDPOINTS.updateTierDiscount, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
+
   createCategoryDiscount(payload) {
     return request(AUTH_ENDPOINTS.createCategoryDiscount, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  updateCategoryDiscount(payload) {
+    return request(AUTH_ENDPOINTS.updateCategoryDiscount, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  getRiskData() {
+    return request(AUTH_ENDPOINTS.riskData)
+  },
+
+  configureRisk(payload) {
+    return request(AUTH_ENDPOINTS.configureRisk, {
       method: 'POST',
       body: JSON.stringify(payload),
     })

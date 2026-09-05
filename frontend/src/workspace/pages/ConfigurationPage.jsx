@@ -2,34 +2,67 @@ import {
   BadgePercent,
   Boxes,
   Check,
-  PackagePlus,
   Plus,
   RefreshCw,
   Save,
-  ShieldCheck,
+  Search,
   Users,
   Warehouse,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { authApi } from '../../api/authApi.js'
+import { getRoleLabel, SIGNUP_ROLE_OPTIONS } from '../../contracts/auth.js'
 import { productApi } from '../../api/productApi.js'
 import { storeApi } from '../../api/storeApi.js'
-import {
-  discountRules as seededDiscountRules,
-  subscriptionPlans as seededPlans,
-} from '../seed.js'
+import { discountRules as seededDiscountRules } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatusBadge } from '../components/Ui.jsx'
 
-const tabs = [
-  { id: 'products', label: 'Products & prices', icon: PackagePlus, roles: ['ADMIN'] },
-  { id: 'discounts', label: 'Discount policy', icon: BadgePercent, roles: ['ADMIN', 'MANAGER'] },
-  { id: 'warehouses', label: 'Warehouses', icon: Warehouse, roles: ['ADMIN'] },
-  { id: 'plans', label: 'Recurring plans', icon: RefreshCw, roles: ['ADMIN'] },
-  { id: 'access', label: 'Access requests', icon: Users, roles: ['ADMIN'] },
-]
+/**
+ * Copy for each configuration surface. Every section is now its own sidebar
+ * entry and its own route, so this page renders exactly one of them at a time
+ * and no longer owns a tab strip.
+ */
+const CONFIGURATION_SECTIONS = Object.freeze({
+  products: {
+    eyebrow: 'Catalogue',
+    title: 'Products & inventory',
+    description:
+      'Create physical SKUs and top up sellable stock per fulfillment store.',
+  },
+  subscriptions: {
+    eyebrow: 'Catalogue',
+    title: 'Subscriptions',
+    description:
+      'A subscription is a product tagged SUBSCRIPTION. Its billing cycle and recurring price live on the subscription record.',
+  },
+  discounts: {
+    eyebrow: 'Pricing policy',
+    title: 'Discount policy',
+    description:
+      'Customer-tier and product-category ceilings. Quote risk is scored against the lower of the two.',
+  },
+  stores: {
+    eyebrow: 'Fulfillment',
+    title: 'Stores',
+    description:
+      'Fulfillment locations. Coordinates drive the nearest-store allocation used when an order is split.',
+  },
+  risk: {
+    eyebrow: 'Pricing policy',
+    title: 'Risk thresholds',
+    description:
+      'Order-level discount thresholds that decide whether a quotation is scored LOW, MEDIUM or HIGH risk.',
+  },
+  access: {
+    eyebrow: 'Administration',
+    title: 'Access requests',
+    description:
+      'Public registration requests a role. Only an administrator can grant it.',
+  },
+})
 
 const emptyProductForm = {
   name: '',
@@ -49,25 +82,43 @@ const emptyStoreForm = {
   long: '',
 }
 
-function ProductsConfiguration() {
+/**
+ * One catalogue view with two modes.
+ *
+ * A subscription is not a separate entity: it is a product carrying the
+ * SUBSCRIPTION category, whose recurring price and cycle are read from the
+ * subscription record. So both surfaces share the same create call and the same
+ * listing, and differ only in which category they write and which rows they show.
+ */
+function ProductsConfiguration({ mode = 'physical' }) {
+  const subscriptionMode = mode === 'subscription'
   const [products, setProducts] = useState([])
   const [stores, setStores] = useState([])
   const [catalogueState, setCatalogueState] = useState({ loading: true, error: '' })
-  const [form, setForm] = useState({ ...emptyProductForm })
+  const [form, setForm] = useState(() => ({
+    ...emptyProductForm,
+    category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE',
+  }))
   const [creating, setCreating] = useState(false)
   const [preparedHsn, setPreparedHsn] = useState('')
   const [inventoryDraft, setInventoryDraft] = useState(null)
   const [addingInventory, setAddingInventory] = useState(false)
   const isSubscription = form.category === 'SUBSCRIPTION'
+  const visibleProducts = products.filter(
+    (product) => Boolean(product.recurring) === subscriptionMode,
+  )
 
   useEffect(() => {
     let mounted = true
-    Promise.all([productApi.list(), storeApi.list()])
+    const requests = subscriptionMode
+      ? [productApi.list()]
+      : [productApi.list(), storeApi.list()]
+
+    Promise.all(requests)
       .then(([productResult, storeResult]) => {
         if (!mounted) return
-        const availableStores = storeResult.stores ?? []
         setProducts(productResult.products ?? [])
-        setStores(availableStores)
+        setStores(storeResult?.stores ?? [])
         setCatalogueState({ loading: false, error: '' })
       })
       .catch((error) => {
@@ -75,7 +126,7 @@ function ProductsConfiguration() {
       })
 
     return () => { mounted = false }
-  }, [])
+  }, [subscriptionMode])
 
   function updateField(field, value) {
     if (field === 'hsnCode' || field === 'gst') setPreparedHsn('')
@@ -116,10 +167,15 @@ function ProductsConfiguration() {
       })
       const refreshed = await productApi.list()
       setProducts(refreshed.products ?? [])
-      setForm({ ...emptyProductForm })
+      setForm({
+        ...emptyProductForm,
+        category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE',
+      })
       setPreparedHsn('')
       toast.success(`${result.product.name} created`, {
-        description: `${form.sku.trim()} was created with zero inventory.`,
+        description: subscriptionMode
+          ? `${form.sku.trim()} is billed ${form.cycle.toLowerCase()}.`
+          : `${form.sku.trim()} was created with zero inventory.`,
       })
     } catch (error) {
       toast.error(error.message ?? 'The product could not be created.')
@@ -164,26 +220,29 @@ function ProductsConfiguration() {
   return (
     <div className="configuration-product-stack">
       <Panel
-        title="Create product"
-        description="Create a product and SKU independently of store and inventory setup."
+        title={subscriptionMode ? 'Create subscription' : 'Create product'}
+        description={subscriptionMode
+          ? 'Creates a product tagged SUBSCRIPTION. It carries no store and no tracked inventory.'
+          : 'Create a product and SKU independently of store and inventory setup.'}
       >
         <form className="product-create-form" onSubmit={createProduct}>
           <div className="product-create-grid">
             <label>
-              <span>Product name</span>
-              <input required maxLength={120} placeholder="Ergonomic office chair" value={form.name} onChange={(event) => updateField('name', event.target.value)} />
+              <span>{subscriptionMode ? 'Subscription name' : 'Product name'}</span>
+              <input required maxLength={120} placeholder={subscriptionMode ? 'Managed support plan' : 'Ergonomic office chair'} value={form.name} onChange={(event) => updateField('name', event.target.value)} />
             </label>
-            <label>
-              <span>Category</span>
-              <select value={form.category} onChange={(event) => updateField('category', event.target.value)}>
-                <option value="HARDWARE">Hardware</option>
-                <option value="SERVICES">Service</option>
-                <option value="SUBSCRIPTION">Subscription</option>
-              </select>
-            </label>
+            {!subscriptionMode && (
+              <label>
+                <span>Category</span>
+                <select value={form.category} onChange={(event) => updateField('category', event.target.value)}>
+                  <option value="HARDWARE">Hardware</option>
+                  <option value="SERVICES">Service</option>
+                </select>
+              </label>
+            )}
             <label>
               <span>SKU / seller identifier</span>
-              <input required maxLength={100} placeholder="CHAIR-ERG-01" value={form.sku} onChange={(event) => updateField('sku', event.target.value)} />
+              <input required maxLength={100} placeholder={subscriptionMode ? 'SUB-SUPPORT-01' : 'CHAIR-ERG-01'} value={form.sku} onChange={(event) => updateField('sku', event.target.value)} />
             </label>
 
             <label>
@@ -225,67 +284,87 @@ function ProductsConfiguration() {
           {catalogueState.error && <div className="inline-error">{catalogueState.error}</div>}
 
           <footer className="product-create-actions">
-            <small>New physical SKUs start unassigned with zero inventory. Subscription store, inventory and product discount remain fixed at zero.</small>
+            <small>{subscriptionMode
+              ? 'Store, inventory and product discount stay fixed at zero for subscription articles.'
+              : 'New physical SKUs start unassigned with zero inventory. Add stock per store below.'}</small>
             <button className="button button--primary" type="submit" disabled={creating || catalogueState.loading}>
-              <Plus size={15} /> {creating ? 'Creating product…' : 'Create product'}
+              <Plus size={15} /> {creating
+                ? (subscriptionMode ? 'Creating subscription…' : 'Creating product…')
+                : (subscriptionMode ? 'Create subscription' : 'Create product')}
             </button>
           </footer>
         </form>
       </Panel>
 
-      <Panel title="Product catalogue" description="Manage inventory independently for each physical SKU.">
-        {/* <div className="configuration-summary">
-          <span><Boxes size={17} /><strong>{products.length}</strong><small>Product SKUs</small></span>
-          <span><Layers3 size={17} /><strong>3</strong><small>Supported categories</small></span>
-          <span><CircleDollarSign size={17} /><strong>INR</strong><small>Base currency</small></span>
-        </div> */}
+      <Panel
+        title={subscriptionMode ? 'Active subscriptions' : 'Product catalogue'}
+        description={subscriptionMode
+          ? 'Subscription SKUs available to sales representatives when building a quotation.'
+          : 'Manage inventory independently for each physical SKU.'}
+      >
         <div className="data-table-wrap data-table-wrap--nested">
           <table className="data-table product-catalogue-table">
-            <thead><tr><th>Product</th><th>Category</th><th>Reporting HSN</th><th>Price</th><th>Stock</th><th>Discount limit</th><th>Fulfillment</th><th>Action</th></tr></thead>
+            <thead>
+              {subscriptionMode ? (
+                <tr><th>Subscription</th><th>Reporting HSN</th><th>Recurring price</th><th>Billing cycle</th></tr>
+              ) : (
+                <tr><th>Product</th><th>Category</th><th>Reporting HSN</th><th>Price</th><th>Stock</th><th>Discount limit</th><th>Fulfillment</th><th>Action</th></tr>
+              )}
+            </thead>
             <tbody>
-              {products.map((product) => (
+              {visibleProducts.map((product) => (subscriptionMode ? (
+                <tr key={product.id}>
+                  <td><strong>{product.name}</strong><small>{product.sku}</small></td>
+                  <td>{product.reportingHsn}</td>
+                  <td>₹{Number(product.price).toLocaleString('en-IN')}</td>
+                  <td>{product.unit}</td>
+                </tr>
+              ) : (
                 <tr key={product.id}>
                   <td><strong>{product.name}</strong><small>{product.sku}</small></td>
                   <td>{product.category}</td>
                   <td>{product.reportingHsn}</td>
                   <td>₹{Number(product.price).toLocaleString('en-IN')}</td>
-                  <td>{product.recurring ? 'Not tracked' : product.stock}</td>
+                  <td>{product.stock}</td>
                   <td>{product.discountLimit}%</td>
-                  <td>{product.recurring ? product.unit : stores.find((store) => String(store._id) === product.storeId)?.name ?? 'Not assigned'}</td>
+                  <td>{stores.find((store) => String(store._id) === product.storeId)?.name ?? 'Not assigned'}</td>
                   <td>
-                    {product.recurring ? (
-                      <span className="text-muted">Not tracked</span>
-                    ) : (
-                      <button
-                        className="button button--quiet button--small"
-                        type="button"
-                        onClick={() => setInventoryDraft({
-                          articleId: product.articleId,
-                          name: product.name,
-                          sku: product.sku,
-                          storeId: product.storeId || String(stores[0]?._id ?? ''),
-                          storeLocked: Boolean(product.storeId),
-                          sellable: '',
-                          reserved: '',
-                        })}
-                        disabled={!stores.length}
-                      >
-                        <Plus size={13} /> Add inventory
-                      </button>
-                    )}
+                    <button
+                      className="button button--quiet button--small"
+                      type="button"
+                      onClick={() => setInventoryDraft({
+                        articleId: product.articleId,
+                        name: product.name,
+                        sku: product.sku,
+                        storeId: product.storeId || String(stores[0]?._id ?? ''),
+                        storeLocked: Boolean(product.storeId),
+                        sellable: '',
+                        reserved: '',
+                      })}
+                      disabled={!stores.length}
+                    >
+                      <Plus size={13} /> Add inventory
+                    </button>
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
-          {catalogueState.loading && <p className="empty-copy empty-copy--large">Loading products…</p>}
-          {!catalogueState.loading && !catalogueState.error && !products.length && <p className="empty-copy empty-copy--large">No products yet. Create the first SKU above.</p>}
+          {catalogueState.loading && <p className="empty-copy empty-copy--large">Loading {subscriptionMode ? 'subscriptions' : 'products'}…</p>}
+          {catalogueState.error && <div className="inline-error">{catalogueState.error}</div>}
+          {!catalogueState.loading && !catalogueState.error && !visibleProducts.length && (
+            <p className="empty-copy empty-copy--large">
+              {subscriptionMode
+                ? 'No subscriptions yet. Create the first one above.'
+                : 'No products yet. Create the first SKU above.'}
+            </p>
+          )}
         </div>
-        {!catalogueState.loading && products.some((product) => !product.recurring) && !stores.length && (
-          <div className="product-form-warning">Create a store from the Warehouses tab before adding physical inventory.</div>
+        {!subscriptionMode && !catalogueState.loading && visibleProducts.length > 0 && !stores.length && (
+          <div className="product-form-warning">Create a store from the Stores screen before adding physical inventory.</div>
         )}
 
-        {inventoryDraft && (
+        {!subscriptionMode && inventoryDraft && (
           <form className="inventory-add-form" onSubmit={addInventory}>
             <div>
               <strong>Add inventory</strong>
@@ -327,6 +406,8 @@ function DiscountConfiguration({
   savingTier,
   savingCategory,
   canManage,
+  categoryPersisted,
+  policyState,
 }) {
   const tierDetails = {
     Bronze: 'New and entry-level customer accounts',
@@ -350,21 +431,8 @@ function DiscountConfiguration({
 
   return (
     <div className="discount-policy-layout">
-      <section className="discount-policy-intro" aria-label="How discount limits are applied">
-        <span className="discount-policy-intro__icon"><ShieldCheck size={23} /></span>
-        <div className="discount-policy-intro__copy">
-          <span>Pricing guardrail</span>
-          <strong>The lower discount ceiling always wins</strong>
-          <p>Every quote line is checked against both the customer tier and product category before it can proceed.</p>
-        </div>
-        <div className="discount-policy-formula" aria-label="Customer tier ceiling and category ceiling determine the applied ceiling">
-          <span><small>Customer tier</small><strong>Account limit</strong></span>
-          <i>+</i>
-          <span><small>Product category</small><strong>Line limit</strong></span>
-          <i>→</i>
-          <span className="discount-policy-formula__result"><small>Applied ceiling</small><strong>Lower value</strong></span>
-        </div>
-      </section>
+      {policyState.loading && <div className="discount-policy-status">Loading saved discount policy…</div>}
+      {policyState.error && <div className="inline-error">{policyState.error}</div>}
 
       <Panel
         title="Customer tier limits"
@@ -388,7 +456,7 @@ function DiscountConfiguration({
                     max="100"
                     step="1"
                     value={rule.ceiling}
-                    disabled={!canManage}
+                    disabled={!canManage || policyState.loading || Boolean(policyState.error)}
                     onChange={(event) => updateRule(rule.tier, 'ceiling', event.target.value)}
                   />
                   <i>%</i>
@@ -399,10 +467,12 @@ function DiscountConfiguration({
                 <button
                   className="button button--quiet button--small"
                   type="button"
-                  disabled={!canManage || savingTier === rule.tier}
+                  disabled={!canManage || policyState.loading || Boolean(policyState.error) || savingTier === rule.tier}
                   onClick={() => onCreateTier(rule)}
                 >
-                  <Save size={13} /> {savingTier === rule.tier ? 'Applying…' : `Apply ${rule.tier}`}
+                  <Save size={13} /> {savingTier === rule.tier
+                    ? `${rule.persisted ? 'Updating' : 'Creating'}…`
+                    : `${rule.persisted ? 'Update' : 'Create'} ${rule.tier}`}
                 </button>
               </footer>
             </article>
@@ -418,10 +488,12 @@ function DiscountConfiguration({
           <button
             className="button button--primary"
             type="button"
-            disabled={!canManage || savingCategory}
+            disabled={!canManage || policyState.loading || Boolean(policyState.error) || savingCategory}
             onClick={onCreateCategory}
           >
-            <Save size={14} /> {savingCategory ? 'Applying policy…' : 'Apply category policy'}
+            <Save size={14} /> {savingCategory
+              ? `${categoryPersisted ? 'Updating' : 'Creating'} policy…`
+              : `${categoryPersisted ? 'Update' : 'Create'} category policy`}
           </button>
         )}
       >
@@ -443,7 +515,7 @@ function DiscountConfiguration({
                     min="0"
                     max="100"
                     step="1"
-                    disabled={!canManage || locked}
+                    disabled={!canManage || policyState.loading || Boolean(policyState.error) || locked}
                     onChange={(event) => updateCategory(key, event.target.value)}
                   />
                   <i>%</i>
@@ -548,15 +620,123 @@ function WarehouseConfiguration() {
   )
 }
 
-function PlanConfiguration({ plans }) {
+/**
+ * Thresholds consumed by Morning Star when it scores a quotation. The line-item
+ * rule is deliberately shown as read-only: any line discounted past its own
+ * product ceiling forces at least MEDIUM regardless of these numbers, and that
+ * rule is not configurable server side.
+ */
+function RiskConfiguration() {
+  const [riskData, setRiskData] = useState(null)
+  const [draft, setDraft] = useState({ medium: '', high: '' })
+  const [riskState, setRiskState] = useState({ loading: true, error: '' })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    authApi.getRiskData()
+      .then((result) => {
+        if (!mounted) return
+        setRiskData(result.risk_data)
+        setDraft({
+          medium: String(result.risk_data.medium_risk_threshold),
+          high: String(result.risk_data.high_risk_threshold),
+        })
+        setRiskState({ loading: false, error: '' })
+      })
+      .catch((error) => {
+        if (mounted) setRiskState({ loading: false, error: error.message })
+      })
+
+    return () => { mounted = false }
+  }, [])
+
+  const medium = Number(draft.medium)
+  const high = Number(draft.high)
+  const invalidOrder =
+    Number.isFinite(medium) && Number.isFinite(high) && medium >= high
+
+  async function save(event) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const result = await authApi.configureRisk({
+        medium_risk_threshold: medium,
+        high_risk_threshold: high,
+      })
+      setRiskData(result.risk_data)
+      toast.success('Risk thresholds saved', {
+        description: `MEDIUM above ${result.risk_data.medium_risk_threshold}%, HIGH above ${result.risk_data.high_risk_threshold}%.`,
+      })
+    } catch (error) {
+      toast.error(error.message ?? 'The thresholds could not be saved.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (riskState.loading) {
+    return <Panel title="Risk thresholds"><p className="empty-copy empty-copy--large">Loading risk configuration…</p></Panel>
+  }
+
+  if (riskState.error) {
+    return <Panel title="Risk thresholds"><div className="inline-error">{riskState.error}</div></Panel>
+  }
+
   return (
-    <Panel title="Subscription plans" description="Cadence, proration, cancellation and refund behavior.">
-      <div className="plan-config-list">
-        {plans.map((plan) => (
-          <article key={plan.id}><span className="plan-icon"><RefreshCw size={17} /></span><div><span><strong>{plan.name}</strong><StatusBadge status="APPROVED" label="Active" /></span><small>{plan.activeProducts} linked products</small></div><dl><div><dt>Cadence</dt><dd>{plan.cadence}</dd></div><div><dt>Proration</dt><dd>{plan.proration}</dd></div><div><dt>Cancellation</dt><dd>{plan.cancellation}</dd></div></dl></article>
-        ))}
-      </div>
-    </Panel>
+    <div className="configuration-product-stack">
+      <Panel
+        title="Order discount thresholds"
+        description="Measured on the total discount applied across the whole quotation."
+        action={<StatusBadge status={riskData.configured ? 'APPROVED' : 'DRAFT'} label={riskData.configured ? 'Configured' : 'Using defaults'} />}
+      >
+        <form className="product-create-form" onSubmit={save}>
+          <div className="product-create-grid store-create-grid">
+            <label>
+              <span>MEDIUM above</span>
+              <span className="product-number-control">
+                <input required type="number" min="0" max="100" step="0.01" value={draft.medium} onChange={(event) => setDraft((current) => ({ ...current, medium: event.target.value }))} />
+                <i>%</i>
+              </span>
+            </label>
+            <label>
+              <span>HIGH above</span>
+              <span className="product-number-control">
+                <input required type="number" min="0" max="100" step="0.01" value={draft.high} onChange={(event) => setDraft((current) => ({ ...current, high: event.target.value }))} />
+                <i>%</i>
+              </span>
+            </label>
+          </div>
+
+          {invalidOrder && (
+            <div className="product-form-warning">The HIGH threshold must be greater than the MEDIUM threshold.</div>
+          )}
+
+          <footer className="product-create-actions">
+            <small>
+              {riskData.updatedAt
+                ? `Last changed ${new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(riskData.updatedAt))}.`
+                : 'No override saved yet, so Morning Star is using its built-in defaults.'}
+            </small>
+            <button className="button button--primary" type="submit" disabled={saving || invalidOrder}>
+              <Save size={15} /> {saving ? 'Saving thresholds…' : 'Save thresholds'}
+            </button>
+          </footer>
+        </form>
+      </Panel>
+
+      <Panel title="Line-item rule" description="Applied before the thresholds above and not configurable.">
+        <dl className="allocation-summary">
+          <div><dt>Condition</dt><dd><code>{riskData.line_item_rule.condition}</code></dd></div>
+          <div><dt>Minimum risk when triggered</dt><dd>{riskData.line_item_rule.minimum_risk}</dd></div>
+        </dl>
+        <p className="empty-copy">
+          Any single line discounted beyond its own product ceiling raises the whole
+          quotation to at least {riskData.line_item_rule.minimum_risk}, even when the
+          order-level discount stays under the MEDIUM threshold.
+        </p>
+      </Panel>
+    </div>
   )
 }
 
@@ -571,18 +751,55 @@ function AccessRequests({
   onReasonChange,
   onReview,
 }) {
+  const [query, setQuery] = useState('')
+  const [role, setRole] = useState('ALL')
+  const filteredRequests = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return requests.filter((request) => {
+      const matchesRole = role === 'ALL' || request.requestedRole === role
+      const matchesQuery =
+        !needle ||
+        request.fullName.toLowerCase().includes(needle) ||
+        request.email.toLowerCase().includes(needle)
+      return matchesRole && matchesQuery
+    })
+  }, [query, requests, role])
+
   return (
-    <Panel title="Internal access requests" description="Public registration requests a role; only an administrator can grant it.">
+    <Panel title="Account approval requests" description="Review customer registrations and internal role requests before granting access.">
       {loading ? <p className="empty-copy">Loading access requests…</p> : error ? <div className="inline-error">{error}</div> : (
-        <div className="access-request-list">
-          {requests.map((request) => {
+        <>
+          <div className="access-request-toolbar">
+            <label className="filter-search">
+              <Search size={15} />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search name or email"
+              />
+            </label>
+            <label className="access-role-filter">
+              <span>Role</span>
+              <select value={role} onChange={(event) => setRole(event.target.value)}>
+                <option value="ALL">All roles</option>
+                {SIGNUP_ROLE_OPTIONS.map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <small>{filteredRequests.length} of {requests.length} requests</small>
+          </div>
+
+          <div className="access-request-list">
+          {filteredRequests.map((request) => {
             const isRejecting = rejectionDraft?.id === request.id
 
             return (
               <article key={request.id} className={isRejecting ? 'is-rejecting' : ''}>
                 <span className="request-avatar">{request.fullName.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span>
                 <div><strong>{request.fullName}</strong><small>{request.email}</small></div>
-                <span><small>Requested role · {request.is_verified ? 'Verified' : 'Unverified'}</small><strong>{request.requestedRole.replaceAll('_', ' ')}</strong></span>
+                <span><small>Requested role · {request.is_verified ? 'Verified' : 'Unverified'}</small><strong>{getRoleLabel(request.requestedRole)}</strong></span>
                 <div className="access-request-actions">
                   <button
                     className="button button--danger button--small"
@@ -634,32 +851,49 @@ function AccessRequests({
               </article>
             )
           })}
-          {!requests.length && <p className="empty-copy">No pending access requests.</p>}
-        </div>
+          {!filteredRequests.length && (
+            <p className="empty-copy">
+              {requests.length
+                ? 'No approval requests match these filters.'
+                : 'No pending access requests.'}
+            </p>
+          )}
+          </div>
+        </>
       )}
     </Panel>
   )
 }
 
-export default function ConfigurationPage({ initialTab = 'products' }) {
+/**
+ * Renders one configuration surface, chosen by `section`. Each section is its
+ * own route and its own sidebar entry, so this component no longer decides
+ * navigation — WorkspaceApp does, and it only reaches here for a section the
+ * signed-in role is allowed to open.
+ */
+export default function ConfigurationPage({ section = 'products' }) {
   const { user } = useWorkspace()
-  const visibleTabs = tabs.filter((tab) => tab.roles.includes(user.role))
-  const defaultTab = visibleTabs.some((tab) => tab.id === initialTab)
-    ? initialTab
-    : visibleTabs[0]?.id
-  const [activeTab, setActiveTab] = useState(defaultTab)
-  const [rules, setRules] = useState(seededDiscountRules)
+  const activeTab = section
+  const copy = CONFIGURATION_SECTIONS[section] ?? CONFIGURATION_SECTIONS.products
+  const [rules, setRules] = useState(() => seededDiscountRules.map((rule) => ({
+    ...rule,
+    persisted: false,
+  })))
   const [categoryRules, setCategoryRules] = useState({
     hardware: 15,
     service: 10,
     subscription: 0,
   })
+  const [categoryPersisted, setCategoryPersisted] = useState(false)
+  const [policyState, setPolicyState] = useState({
+    loading: section === 'discounts',
+    error: '',
+  })
   const [savingTier, setSavingTier] = useState('')
   const [savingCategory, setSavingCategory] = useState(false)
-  const [plans] = useState(seededPlans)
   const [requests, setRequests] = useState([])
   const [requestState, setRequestState] = useState({
-    loading: initialTab === 'access',
+    loading: section === 'access',
     error: '',
   })
   const [reviewing, setReviewing] = useState(null)
@@ -680,6 +914,45 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
       })
     return () => { mounted = false }
   }, [activeTab, user.role])
+
+  useEffect(() => {
+    if (activeTab !== 'discounts') return
+    let mounted = true
+
+    authApi.getDiscountPolicy()
+      .then((result) => {
+        if (!mounted) return
+        const persistedTiers = new Map(
+          (result.tier_discounts ?? []).map((item) => [item.tier.toUpperCase(), item]),
+        )
+        setRules(seededDiscountRules.map((rule) => {
+          const saved = persistedTiers.get(rule.tier.toUpperCase())
+          return {
+            ...rule,
+            ceiling: saved?.discount ?? rule.ceiling,
+            persisted: Boolean(saved),
+          }
+        }))
+
+        const savedCategory = result.category_discount
+        if (savedCategory) {
+          setCategoryRules({
+            hardware: savedCategory.hardware,
+            service: savedCategory.service,
+            subscription: savedCategory.subscription,
+          })
+          setCategoryPersisted(true)
+        } else {
+          setCategoryPersisted(false)
+        }
+        setPolicyState({ loading: false, error: '' })
+      })
+      .catch((error) => {
+        if (mounted) setPolicyState({ loading: false, error: error.message })
+      })
+
+    return () => { mounted = false }
+  }, [activeTab])
 
   async function reviewRegistration(requestId, decision, reason = null) {
     if (reviewing) return
@@ -710,11 +983,17 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
   async function createTierDiscount(rule) {
     setSavingTier(rule.tier)
     try {
-      const result = await authApi.createTierDiscount({
+      const payload = {
         tier: rule.tier.toUpperCase(),
         discount: rule.ceiling,
-      })
-      toast.success(`${result.tier_discount.tier} tier created`, {
+      }
+      const result = rule.persisted
+        ? await authApi.updateTierDiscount(payload)
+        : await authApi.createTierDiscount(payload)
+      setRules((current) => current.map((item) => item.tier === rule.tier
+        ? { ...item, ceiling: result.tier_discount.discount, persisted: true }
+        : item))
+      toast.success(`${result.tier_discount.tier} tier ${rule.persisted ? 'updated' : 'created'}`, {
         description: `${result.tier_discount.discount}% customer discount`,
       })
     } catch (error) {
@@ -727,8 +1006,16 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
   async function createCategoryDiscount() {
     setSavingCategory(true)
     try {
-      await authApi.createCategoryDiscount(categoryRules)
-      toast.success('Category discount policy created')
+      const result = categoryPersisted
+        ? await authApi.updateCategoryDiscount(categoryRules)
+        : await authApi.createCategoryDiscount(categoryRules)
+      setCategoryRules({
+        hardware: result.category_discount.hardware,
+        service: result.category_discount.service,
+        subscription: result.category_discount.subscription,
+      })
+      setCategoryPersisted(true)
+      toast.success(`Category discount policy ${categoryPersisted ? 'updated' : 'created'}`)
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -739,28 +1026,14 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Sales back-end"
-        title={user.role === 'MANAGER' ? 'Pricing policy' : 'Configuration'}
-        description={user.role === 'MANAGER'
-          ? 'Set customer-tier and category discount ceilings used by automatic approval routing.'
-          : 'Control products, pricing, fulfillment, recurring billing and internal access.'}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        description={copy.description}
       />
 
-      <section className="configuration-tabs">
-        {visibleTabs.map(({ id, label, icon: Icon }) => (
-          <button
-            className={activeTab === id ? 'active' : ''}
-            type="button"
-            key={id}
-            onClick={() => {
-              setActiveTab(id)
-              if (id === 'access' && user.role === 'ADMIN') setRequestState({ loading: true, error: '' })
-            }}
-          ><Icon size={15} /> {label}</button>
-        ))}
-      </section>
-
-      {activeTab === 'products' && <ProductsConfiguration />}
+      {activeTab === 'products' && <ProductsConfiguration mode="physical" />}
+      {activeTab === 'subscriptions' && <ProductsConfiguration mode="subscription" />}
+      {activeTab === 'risk' && <RiskConfiguration />}
       {activeTab === 'discounts' && (
         <DiscountConfiguration
           rules={rules}
@@ -772,10 +1045,11 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
           savingTier={savingTier}
           savingCategory={savingCategory}
           canManage={['ADMIN', 'MANAGER'].includes(user.role)}
+          categoryPersisted={categoryPersisted}
+          policyState={policyState}
         />
       )}
-      {activeTab === 'warehouses' && <WarehouseConfiguration />}
-      {activeTab === 'plans' && <PlanConfiguration plans={plans} />}
+      {activeTab === 'stores' && <WarehouseConfiguration />}
       {activeTab === 'access' && (
         <AccessRequests
           requests={requests}

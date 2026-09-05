@@ -1,5 +1,5 @@
 import {
-  INTERNAL_ROLE_OPTIONS,
+  SIGNUP_ROLE_OPTIONS,
   USER_ROLES,
   USER_STATUSES,
 } from '../contracts/auth.js'
@@ -80,6 +80,20 @@ const seedUsers = [
 
 let activeUserId = null
 let activePortalSession = null
+let mockTierDiscounts = []
+let mockCategoryDiscount = null
+let mockRiskData = {
+  configured: false,
+  medium_risk_threshold: 25,
+  high_risk_threshold: 50,
+  line_item_rule: {
+    condition: 'applied_discount > product_discount',
+    minimum_risk: 'MEDIUM',
+    configurable: false,
+  },
+  updated_by: null,
+  updatedAt: null,
+}
 
 function wait() {
   return new Promise((resolve) => window.setTimeout(resolve, MOCK_DELAY_MS))
@@ -142,14 +156,41 @@ function apiError(status, code, message, details) {
 }
 
 export const mockAuthApi = {
-  async register({ fullName, email, password, requestedRole }) {
+  async register({
+    fullName,
+    email,
+    password,
+    requestedRole = USER_ROLES.CUSTOMER,
+    _custom_json = null,
+  }) {
     await wait()
     const users = readUsers()
     const normalisedEmail = normaliseEmail(email)
-    const allowedRole = INTERNAL_ROLE_OPTIONS.some((role) => role.value === requestedRole)
+    const allowedRole = SIGNUP_ROLE_OPTIONS.some(
+      (role) => role.value === requestedRole,
+    )
 
     if (!allowedRole) {
-      throw apiError(400, 'INVALID_ROLE', 'Choose one of the available internal roles.')
+      throw apiError(400, 'INVALID_ROLE', 'Choose one of the available account types.')
+    }
+
+    if (requestedRole === USER_ROLES.CUSTOMER) {
+      const hasValidCustomerDetails =
+        String(_custom_json?.delivery_address ?? '').trim().length > 0 &&
+        Number.isFinite(_custom_json?.lat) &&
+        _custom_json.lat >= -90 &&
+        _custom_json.lat <= 90 &&
+        Number.isFinite(_custom_json?.long) &&
+        _custom_json.long >= -180 &&
+        _custom_json.long <= 180
+
+      if (!hasValidCustomerDetails) {
+        throw apiError(
+          400,
+          'INVALID_CUSTOMER_DETAILS',
+          'Enter a delivery address and valid latitude and longitude.',
+        )
+      }
     }
 
     const existingUser = users.find((user) => user.email === normalisedEmail)
@@ -170,6 +211,8 @@ export const mockAuthApi = {
       status: USER_STATUSES.PENDING_APPROVAL,
       is_verified: false,
       is_deleted: false,
+      _custom_json:
+        requestedRole === USER_ROLES.CUSTOMER ? { ..._custom_json } : null,
       approval: {
         requestedAt: submittedAt,
         reviewedAt: null,
@@ -194,8 +237,8 @@ export const mockAuthApi = {
         },
       },
       message: resubmitted
-        ? 'Your new access request has been sent to an administrator.'
-        : 'Your access request has been sent to an administrator.',
+        ? 'Your new account request has been sent to an administrator.'
+        : 'Your account request has been sent to an administrator.',
     }
   },
 
@@ -342,29 +385,92 @@ export const mockAuthApi = {
 
   async createTierDiscount({ tier, discount }) {
     await wait()
-    return {
-      tier_discount: {
-        id: createId('tier'),
-        tier,
-        discount,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
+    const now = new Date().toISOString()
+    const tierDiscount = {
+      id: createId('tier'),
+      tier,
+      discount,
+      createdAt: now,
+      updatedAt: now,
     }
+    mockTierDiscounts.push(tierDiscount)
+    return { tier_discount: tierDiscount }
+  },
+
+  async getDiscountPolicy() {
+    await wait()
+    return {
+      tier_discounts: [...mockTierDiscounts],
+      category_discount: mockCategoryDiscount,
+    }
+  },
+
+  async updateTierDiscount({ tier, discount }) {
+    await wait()
+    const existing = mockTierDiscounts.find(
+      (item) => item.tier.toUpperCase() === tier.toUpperCase(),
+    )
+    const now = new Date().toISOString()
+    const tierDiscount = existing
+      ? { ...existing, discount, updatedAt: now }
+      : { id: createId('tier'), tier, discount, createdAt: now, updatedAt: now }
+    mockTierDiscounts = [
+      ...mockTierDiscounts.filter((item) => item.id !== tierDiscount.id),
+      tierDiscount,
+    ]
+    return { tier_discount: tierDiscount }
   },
 
   async createCategoryDiscount({ hardware, service, subscription }) {
     await wait()
-    return {
-      category_discount: {
-        id: createId('category'),
-        hardware,
-        service,
-        subscription,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
+    const now = new Date().toISOString()
+    mockCategoryDiscount = {
+      id: createId('category'),
+      hardware,
+      service,
+      subscription,
+      createdAt: now,
+      updatedAt: now,
     }
+    return { category_discount: mockCategoryDiscount }
+  },
+
+  async updateCategoryDiscount({ hardware, service, subscription }) {
+    await wait()
+    const now = new Date().toISOString()
+    mockCategoryDiscount = {
+      id: mockCategoryDiscount?.id ?? createId('category'),
+      hardware,
+      service,
+      subscription,
+      createdAt: mockCategoryDiscount?.createdAt ?? now,
+      updatedAt: now,
+    }
+    return { category_discount: mockCategoryDiscount }
+  },
+
+  async getRiskData() {
+    await wait()
+    return { risk_data: mockRiskData }
+  },
+
+  async configureRisk({ medium_risk_threshold, high_risk_threshold }) {
+    await wait()
+    if (medium_risk_threshold >= high_risk_threshold) {
+      throw apiError(
+        400,
+        'VALIDATION_ERROR',
+        'The high threshold must be greater than the medium threshold.',
+      )
+    }
+    mockRiskData = {
+      ...mockRiskData,
+      configured: true,
+      medium_risk_threshold,
+      high_risk_threshold,
+      updatedAt: new Date().toISOString(),
+    }
+    return { risk_data: mockRiskData }
   },
 }
 

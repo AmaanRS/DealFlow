@@ -79,12 +79,17 @@ export async function updateTierDiscount(req, res) {
   const normalizedTier = tier.trim().toUpperCase();
   const tierDiscount = await TierDiscount.findOneAndUpdate(
     { tier: normalizedTier },
-    {
-      $set: { discount },
-      $setOnInsert: { tier: normalizedTier },
-    },
-    { upsert: true, returnDocument: "after", runValidators: true },
+    { $set: { discount } },
+    { returnDocument: "after", runValidators: true },
   );
+
+  if (!tierDiscount) {
+    res.status(404).json({
+      code: "TIER_DISCOUNT_NOT_FOUND",
+      message: "Create the tier discount before updating it",
+    });
+    return;
+  }
 
   logger.info("Tier discount configured", {
     "event.name": "discount.tier.configured",
@@ -142,13 +147,19 @@ export async function updateCategoryDiscount(req, res) {
     .sort({ updatedAt: -1, _id: -1 })
     .select("_id")
     .lean();
-  const categoryDiscount = current
-    ? await CategoryDiscount.findByIdAndUpdate(
-        current._id,
-        { $set: updates },
-        { returnDocument: "after", runValidators: true },
-      )
-    : await CategoryDiscount.create({ ...updates, subscription: 0 });
+  if (!current) {
+    res.status(404).json({
+      code: "CATEGORY_DISCOUNT_NOT_FOUND",
+      message: "Create the category discount policy before updating it",
+    });
+    return;
+  }
+
+  const categoryDiscount = await CategoryDiscount.findByIdAndUpdate(
+    current._id,
+    { $set: updates },
+    { returnDocument: "after", runValidators: true },
+  );
 
   logger.info("Category discount configured", {
     "event.name": "discount.category.configured",

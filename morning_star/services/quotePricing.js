@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { AUTO_APPROVER } from "@app/models/constants";
 import { User } from "@app/models/auth";
 import { Article, Hsn, Item } from "@app/models/catalog";
 import { CategoryDiscount, TierDiscount } from "@app/models/discounts";
@@ -35,6 +36,54 @@ const CATEGORY_DISCOUNT_FIELDS = Object.freeze({
 
 function pricingError(status, code, message, details) {
   return Object.assign(new Error(message), { status, code, details });
+}
+
+export function normalizeQuoteInput(input) {
+  const normalized = { ...input };
+  const effectiveStatus = normalized.status ?? "DRAFT";
+  const effectiveRisk = normalized.risk ?? "LOW";
+
+  if (
+    effectiveStatus === "APPROVED" &&
+    effectiveRisk === "LOW" &&
+    (normalized.approved_by === undefined ||
+      normalized.approved_by === null ||
+      normalized.approved_by === "")
+  ) {
+    normalized.approved_by = AUTO_APPROVER;
+  }
+
+  if (
+    effectiveStatus === "APPROVED" &&
+    effectiveRisk !== "LOW" &&
+    (!normalized.approved_by || normalized.approved_by === AUTO_APPROVER)
+  ) {
+    throw pricingError(
+      400,
+      "APPROVER_REQUIRED",
+      "MEDIUM and HIGH risk approved quotations require an approver email",
+    );
+  }
+
+  return normalized;
+}
+
+export function applyCreationRiskWorkflow(pricedQuotation) {
+  if (pricedQuotation.status === "DRAFT") {
+    return normalizeQuoteInput({
+      ...pricedQuotation,
+      status: "DRAFT",
+      approved_by: null,
+    });
+  }
+
+  const isLowRisk = pricedQuotation.risk === "LOW";
+
+  return normalizeQuoteInput({
+    ...pricedQuotation,
+    status: isLowRisk ? "APPROVED" : "PENDING_APPROVAL",
+    approved_by: isLowRisk ? AUTO_APPROVER : null,
+  });
 }
 
 function rejectUnknownFields(value, allowedFields, location) {

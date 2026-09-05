@@ -5,9 +5,11 @@ import { USER_ROLES, USER_STATUSES } from '@app/models/constants'
 // API config loads the service's OpenTelemetry environment before the route
 // imports telemetry and the shared observability package.
 await import('../src/config.js')
-const { default: adminRoutes, reviewPendingRegistration } = await import(
-  '../src/routes/admin.js'
-)
+const {
+  callDiscountService,
+  default: adminRoutes,
+  reviewPendingRegistration,
+} = await import('../src/routes/admin.js')
 const { shutdownObservability } = await import('@app/observability')
 
 after(() => shutdownObservability())
@@ -68,6 +70,54 @@ test('risk configuration endpoints are registered as admin routes', () => {
 
   assert.equal(configureRoute?.methods.post, true)
   assert.equal(dataRoute?.methods.get, true)
+})
+
+test('discount policy supports reading, creating, and patching persisted rules', () => {
+  const route = (path) => adminRoutes.stack.find(
+    (layer) => layer.route?.path === path,
+  )?.route
+
+  assert.equal(route('/discount_policy')?.methods.get, true)
+  assert.equal(route('/create_tier_discount')?.methods.post, true)
+  assert.equal(route('/tier_discount')?.methods.patch, true)
+  assert.equal(route('/category_discount')?.methods.patch, true)
+
+  const createCategoryRoute = adminRoutes.stack.find(
+    (layer) => Array.isArray(layer.route?.path) &&
+      layer.route.path.includes('/create_category_discount'),
+  )?.route
+  assert.equal(createCategoryRoute?.methods.post, true)
+})
+
+test('discount updates are forwarded to Night Sky as PATCH requests', async () => {
+  let observed
+  const payload = { tier: 'GOLD', discount: 14 }
+  const result = await callDiscountService(
+    { requestId: 'request-discount-update' },
+    '/tier/tier_discount',
+    payload,
+    {
+      fetchImpl: async (url, options) => {
+        observed = { url, options }
+        return {
+          status: 200,
+          json: async () => ({
+            tier_discount: {
+              _id: '507f1f77bcf86cd799439012',
+              ...payload,
+            },
+          }),
+        }
+      },
+    },
+  )
+
+  assert.equal(observed.url.pathname, '/tier/tier_discount')
+  assert.equal(observed.options.method, 'PATCH')
+  assert.equal(observed.options.headers['X-Request-Id'], 'request-discount-update')
+  assert.deepEqual(JSON.parse(observed.options.body), payload)
+  assert.equal(result.status, 200)
+  assert.equal(result.data.tier_discount.discount, 14)
 })
 
 test('approval activates the user and persists is_verified true', async () => {

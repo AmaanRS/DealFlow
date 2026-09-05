@@ -26,25 +26,65 @@ export function effectiveDiscount(lineDiscount = 0, orderDiscount = 0) {
   return (1 - lineFactor * orderFactor) * 100
 }
 
-export function calculateQuote(quote) {
+const categoryPolicyField = {
+  HARDWARE: 'hardware',
+  SERVICES: 'service',
+  SUBSCRIPTION: 'subscription',
+}
+
+function applyDiscount(amount, discount) {
+  return amount * (1 - Math.min(Math.max(Number(discount) || 0, 0), 100) / 100)
+}
+
+function liveTierDiscount(quote, pricingPolicy) {
+  if (!pricingPolicy) {
+    if (Number.isFinite(quote.serverPricing?.tierDiscount)) {
+      return quote.serverPricing.tierDiscount
+    }
+    return CUSTOMER_TIER_LIMITS[quote.customer.tier] ?? 0
+  }
+  return pricingPolicy.tier_discounts?.find(
+    (item) => item.tier.toUpperCase() === quote.customer.tier?.toUpperCase(),
+  )?.discount ?? 0
+}
+
+function liveCategoryDiscount(product, pricingPolicy) {
+  if (!pricingPolicy) {
+    if (Number.isFinite(product.categoryDiscount)) {
+      return product.categoryDiscount
+    }
+    return CATEGORY_DISCOUNT_LIMITS[product.category] ?? 0
+  }
+  const field = categoryPolicyField[product.categoryCode]
+  return field ? pricingPolicy.category_discount?.[field] ?? 0 : 0
+}
+
+export function calculateQuote(quote, pricingPolicy = null) {
+  const tierDiscount = liveTierDiscount(quote, pricingPolicy)
   const enrichedLines = quote.lines
     .map((line) => {
       const product = line.product ?? productById.get(line.productId)
       if (!product) return null
       const gross = product.price * line.quantity
-      const discount = effectiveDiscount(line.discount, quote.orderDiscount)
-      const net = gross * (1 - discount / 100)
+      const categoryDiscount = liveCategoryDiscount(product, pricingPolicy)
+      let net = gross
+      for (const discount of [
+        categoryDiscount,
+        line.discount,
+        tierDiscount,
+        quote.orderDiscount,
+      ]) {
+        net = applyDiscount(net, discount)
+      }
+      const discount = gross > 0 ? ((gross - net) / gross) * 100 : 0
       const cost = Number.isFinite(product.cost)
         ? product.cost * line.quantity
         : null
       const marginValue = cost === null ? null : net - cost
       const allowedDiscount = Number.isFinite(product.discountLimit)
         ? product.discountLimit
-        : Math.min(
-            CUSTOMER_TIER_LIMITS[quote.customer.tier] ?? 0,
-            CATEGORY_DISCOUNT_LIMITS[product.category] ?? 0,
-          )
-      const excess = Math.max(0, discount - allowedDiscount)
+        : 0
+      const excess = Math.max(0, line.discount - allowedDiscount)
 
       return {
         ...line,
@@ -56,6 +96,8 @@ export function calculateQuote(quote) {
         marginValue,
         marginPercent:
           marginValue === null ? null : net ? (marginValue / net) * 100 : 0,
+        categoryDiscount,
+        tierDiscount,
         allowedDiscount,
         excess,
       }
@@ -71,22 +113,34 @@ export function calculateQuote(quote) {
   const marginValue = cost === null ? null : total - cost
   const marginPercent =
     marginValue === null ? null : total ? (marginValue / total) * 100 : 0
+  const discountPercentage = gross
+    ? Math.max(0, ((gross - total) / gross) * 100)
+    : 0
+  const lineItemRuleTriggered = enrichedLines.some(
+    (line) => line.discount > line.allowedDiscount,
+  )
   const weightedExcess = gross
-    ? enrichedLines.reduce((sum, line) => sum + line.excess * (line.gross / gross), 0)
+    ? enrichedLines.reduce(
+        (sum, line) => sum + line.excess * (line.gross / gross),
+        0,
+      )
     : 0
   const maxExcess = Math.max(0, ...enrichedLines.map((line) => line.excess))
-  const lowMarginPenalty =
-    marginPercent === null ? 0 : marginPercent < 20 ? 18 : marginPercent < 28 ? 8 : 0
-  const riskScore = Math.min(
-    100,
-    Math.round(maxExcess * 6 + weightedExcess * 4 + lowMarginPenalty),
-  )
-  const approvalLevel =
-    riskScore >= 65 || maxExcess >= 8
-      ? 'MANAGER_AND_FINANCE'
-      : riskScore > 0
-        ? 'MANAGER'
-        : 'NONE'
+  const mediumRiskThreshold =
+    pricingPolicy?.risk_data?.medium_risk_threshold ?? 25
+  const highRiskThreshold =
+    pricingPolicy?.risk_data?.high_risk_threshold ?? 50
+  const risk = discountPercentage > highRiskThreshold
+    ? 'HIGH'
+    : lineItemRuleTriggered || discountPercentage > mediumRiskThreshold
+      ? 'MEDIUM'
+      : 'LOW'
+  const riskScore = Math.round(discountPercentage * 100) / 100
+  const approvalLevel = risk === 'HIGH'
+    ? 'MANAGER_AND_FINANCE'
+    : risk === 'MEDIUM'
+      ? 'MANAGER'
+      : 'NONE'
 
   const calculated = {
     lines: enrichedLines,
@@ -96,16 +150,28 @@ export function calculateQuote(quote) {
     discountValue,
     marginValue,
     marginPercent,
+    discountPercentage,
+    lineItemRuleTriggered,
     weightedExcess,
     maxExcess,
+    tierDiscount,
+    mediumRiskThreshold,
+    highRiskThreshold,
+    risk,
     riskScore,
     approvalLevel,
   }
 
   if (!quote.serverPricing) return calculated
 
-  const serverRiskScore =
-    { LOW: 15, MEDIUM: 50, HIGH: 85 }[quote.serverPricing.risk] ?? 0
+  const serverDiscountPercentage = quote.serverPricing.gross
+    ? Math.max(
+        0,
+        ((quote.serverPricing.gross - quote.serverPricing.discounted) /
+          quote.serverPricing.gross) * 100,
+      )
+    : 0
+
   return {
     ...calculated,
     gross: quote.serverPricing.gross,
@@ -117,7 +183,9 @@ export function calculateQuote(quote) {
     ),
     marginValue: null,
     marginPercent: null,
-    riskScore: serverRiskScore,
+    discountPercentage: serverDiscountPercentage,
+    risk: quote.serverPricing.risk,
+    riskScore: Math.round(serverDiscountPercentage * 100) / 100,
     approvalLevel:
       quote.serverPricing.risk === 'HIGH'
         ? 'MANAGER_AND_FINANCE'

@@ -8,6 +8,43 @@ const { shutdownObservability } = await import('@app/observability')
 
 after(() => shutdownObservability())
 
+test('registration defaults to CUSTOMER when requestedRole is omitted', async () => {
+  let createdUser
+  const customerDetails = {
+    delivery_address: '24 Marine Drive, Mumbai, Maharashtra 400020',
+    lat: 18.943,
+    long: 72.823,
+  }
+  const UserModel = {
+    findOne: async () => null,
+    create: async (user) => {
+      createdUser = { _id: '507f1f77bcf86cd799439012', ...user }
+      return createdUser
+    },
+  }
+
+  const result = await createRegistrationRequest(
+    {
+      fullName: 'Customer User',
+      email: 'customer@example.com',
+      password: 'CustomerPassword1',
+      _custom_json: customerDetails,
+    },
+    {
+      UserModel,
+      passwordHasher: async () => 'hashed-customer-password',
+      submittedAt: new Date('2026-09-06T11:00:00.000Z'),
+    },
+  )
+
+  assert.equal(result.resubmitted, false)
+  assert.equal(createdUser.requestedRole, USER_ROLES.CUSTOMER)
+  assert.equal(createdUser.status, USER_STATUSES.PENDING_APPROVAL)
+  assert.equal(createdUser.role, null)
+  assert.equal(createdUser.is_verified, false)
+  assert.deepEqual(createdUser._custom_json, customerDetails)
+})
+
 test('a rejected user can resubmit registration with the same user id', async () => {
   const previousReviewedAt = new Date('2026-09-05T10:30:00.000Z')
   const existingUser = {

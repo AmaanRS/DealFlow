@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
 import { z } from 'zod'
+import { config } from '../config.js'
 import { USER_ROLES, USER_STATUSES } from '../constants.js'
 import { asyncRoute, parseBody } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
@@ -21,17 +22,19 @@ import {
 } from '../telemetry.js'
 
 const router = Router()
+const discountServiceUrl = config.get('night_sky_url')
+const discountManagerRoles = [USER_ROLES.ADMIN, USER_ROLES.MANAGER]
 
 router.use(asyncRoute(requireInternalAuth))
 
 const createTierDiscountSchema = z.object({
   tier: z.string().trim().min(1).max(100),
-  discount: z.number().int().min(0),
+  discount: z.number().int().min(0).max(100),
 }).strict()
 
 const createCategoryDiscountSchema = z.object({
-  hardware: z.number().min(0).optional().default(0),
-  service: z.number().min(0).optional().default(0),
+  hardware: z.number().min(0).max(100).optional().default(0),
+  service: z.number().min(0).max(100).optional().default(0),
   subscription: z.literal(0).optional().default(0),
 }).strict()
 
@@ -70,6 +73,52 @@ function publicCategoryDiscount(discount) {
   }
 }
 
+export async function callDiscountService(
+  req,
+  path,
+  body,
+  { fetchImpl = fetch } = {},
+) {
+  let response
+  try {
+    response = await fetchImpl(new URL(path, discountServiceUrl), {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Request-Id': req.requestId,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5_000),
+    })
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError'
+    throw Object.assign(
+      new Error(
+        timedOut
+          ? 'The discount service did not respond in time.'
+          : 'The discount service is unavailable.',
+      ),
+      {
+        status: timedOut ? 504 : 502,
+        code: timedOut
+          ? 'DISCOUNT_SERVICE_TIMEOUT'
+          : 'DISCOUNT_SERVICE_UNAVAILABLE',
+      },
+    )
+  }
+
+  const data = await response.json().catch(() => null)
+  if (!data) {
+    throw Object.assign(
+      new Error('The discount service returned an invalid response.'),
+      { status: 502, code: 'INVALID_DISCOUNT_SERVICE_RESPONSE' },
+    )
+  }
+
+  return { data, status: response.status }
+}
+
 export function publicRiskData(configuration) {
   const thresholds = effectiveRiskThresholds(configuration)
 
@@ -103,6 +152,31 @@ function logRegistrationReviewFailure(req, requestId, errorCode, outcome) {
     }),
   )
 }
+
+router.get(
+  '/discount_policy',
+  requireRoles(...discountManagerRoles),
+  asyncRoute(async (req, res) => {
+    const [tierDiscounts, categoryDiscount] = await Promise.all([
+      TierDiscount.find().sort({ discount: 1, tier: 1 }).lean(),
+      CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
+    ])
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'discount.operation': 'read_policy',
+      'discount.tier_count': tierDiscounts.length,
+      'discount.category_configured': Boolean(categoryDiscount),
+    })
+
+    res.json({
+      tier_discounts: tierDiscounts.map(publicTierDiscount),
+      category_discount: categoryDiscount
+        ? publicCategoryDiscount(categoryDiscount)
+        : null,
+    })
+  }),
+)
 
 router.post(
   '/create_tier_discount',
@@ -168,6 +242,57 @@ router.post(
   }),
 )
 
+router.patch(
+  '/tier_discount',
+  requireRoles(...discountManagerRoles),
+  asyncRoute(async (req, res) => {
+    const body = parseBody(createTierDiscountSchema, req, res)
+    if (!body) return
+
+    const result = await callDiscountService(req, '/tier/tier_discount', body)
+    if (result.status >= 400) {
+      setRequestAttributes(req, {
+        'event.outcome': 'failure',
+        'error.code': result.data.code,
+        'discount.type': 'tier',
+        'discount.tier': body.tier,
+        'discount.outcome': 'update_rejected',
+      })
+      res.status(result.status).json(result.data)
+      return
+    }
+
+    const discount = result.data.tier_discount
+    await AuditEvent.create({
+      eventType: 'TIER_DISCOUNT_UPDATED',
+      actorUserId: req.auth.user._id,
+      metadata: {
+        tierDiscountId: String(discount._id),
+        tier: discount.tier,
+        discount: discount.discount,
+      },
+    })
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'discount.type': 'tier',
+      'discount.id': String(discount._id),
+      'discount.tier': discount.tier,
+      'discount.value': discount.discount,
+      'discount.outcome': 'updated',
+    })
+    logger.info(
+      'Tier discount updated',
+      requestLogContext(req, {
+        'event.name': 'admin.tier_discount.updated',
+        'event.outcome': 'success',
+      }),
+    )
+
+    res.json({ tier_discount: publicTierDiscount(discount) })
+  }),
+)
+
 router.post(
   ['/create_category_discount', '/create_category_discount_'],
   requireRoles(USER_ROLES.ADMIN, USER_ROLES.MANAGER),
@@ -208,6 +333,62 @@ router.post(
     res.status(201).json({
       category_discount: publicCategoryDiscount(discount),
     })
+  }),
+)
+
+router.patch(
+  '/category_discount',
+  requireRoles(...discountManagerRoles),
+  asyncRoute(async (req, res) => {
+    const body = parseBody(createCategoryDiscountSchema, req, res)
+    if (!body) return
+
+    const result = await callDiscountService(
+      req,
+      '/category/category_discount',
+      body,
+    )
+    if (result.status >= 400) {
+      setRequestAttributes(req, {
+        'event.outcome': 'failure',
+        'error.code': result.data.code,
+        'discount.type': 'category',
+        'discount.outcome': 'update_rejected',
+      })
+      res.status(result.status).json(result.data)
+      return
+    }
+
+    const discount = result.data.category_discount
+    await AuditEvent.create({
+      eventType: 'CATEGORY_DISCOUNT_UPDATED',
+      actorUserId: req.auth.user._id,
+      metadata: {
+        categoryDiscountId: String(discount._id),
+        hardware: discount.hardware,
+        service: discount.service,
+        subscription: discount.subscription,
+      },
+    })
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'discount.type': 'category',
+      'discount.id': String(discount._id),
+      'discount.hardware': discount.hardware,
+      'discount.service': discount.service,
+      'discount.subscription': discount.subscription,
+      'discount.outcome': 'updated',
+    })
+    logger.info(
+      'Category discount updated',
+      requestLogContext(req, {
+        'event.name': 'admin.category_discount.updated',
+        'event.outcome': 'success',
+      }),
+    )
+
+    res.json({ category_discount: publicCategoryDiscount(discount) })
   }),
 )
 
