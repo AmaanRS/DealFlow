@@ -1,0 +1,158 @@
+import {
+  AlertOctagon,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Clock3,
+  CornerUpLeft,
+  FileCheck2,
+  ShieldAlert,
+  X,
+} from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { toast } from 'sonner'
+import { calculateQuote, formatMoney } from '../dealMath.js'
+import { useWorkspace } from '../WorkspaceContext.jsx'
+import { PageHeader, Panel, RiskGauge, StatusBadge } from '../components/Ui.jsx'
+
+export default function ApprovalsPage() {
+  const { quoteId } = useParams()
+  const navigate = useNavigate()
+  const { quotes, reviewQuote } = useWorkspace()
+  const approvalQuotes = quotes.filter((quote) =>
+    ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REVISION'].includes(quote.stage),
+  )
+  const [selectedId, setSelectedId] = useState(quoteId || approvalQuotes[0]?.id)
+  const [reason, setReason] = useState('')
+  const quote = approvalQuotes.find((item) => item.id === selectedId)
+
+  function decide(decision) {
+    if (decision !== 'APPROVE' && reason.trim().length < 3) {
+      toast.error('Add a reason before returning or rejecting the quotation')
+      return
+    }
+    reviewQuote(quote.id, decision, reason.trim())
+    setReason('')
+    toast.success(
+      decision === 'APPROVE'
+        ? 'Approval decision recorded'
+        : decision === 'REJECT'
+          ? 'Quotation rejected'
+          : 'Quotation returned to the sales rep',
+    )
+  }
+
+  if (!quote) {
+    return (
+      <div className="page-stack">
+        <PageHeader eyebrow="Pricing governance" title="Discount approvals" description="No quotation currently requires a pricing decision." />
+      </div>
+    )
+  }
+
+  const calculation = calculateQuote(quote)
+  const canAct = quote.stage === 'PENDING_APPROVAL'
+
+  return (
+    <div className="page-stack">
+      <PageHeader
+        eyebrow="Pricing governance"
+        title="Discount approvals"
+        description="Review the blended commercial risk, approval path and complete audit history."
+        actions={<button className="button button--quiet" type="button" onClick={() => navigate(`/quotations/${quote.id}`)}><ArrowLeft size={15} /> Open quotation</button>}
+      />
+
+      <div className="approval-layout">
+        <Panel title="Review queue" description={`${approvalQuotes.filter((item) => item.stage === 'PENDING_APPROVAL').length} decisions are waiting.`} className="approval-queue-panel">
+          <div className="approval-queue">
+            {approvalQuotes.map((item) => {
+              const itemCalculation = calculateQuote(item)
+              return (
+                <button className={selectedId === item.id ? 'active' : ''} type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
+                  <span><strong>{item.customer.name}</strong><small>{item.id} · {formatMoney(itemCalculation.total)}</small></span>
+                  <span><StatusBadge status={item.stage} /><b>{itemCalculation.riskScore}</b></span>
+                </button>
+              )
+            })}
+          </div>
+        </Panel>
+
+        <div className="approval-detail">
+          <section className="approval-hero">
+            <div>
+              <span className="page-eyebrow">{quote.id}</span>
+              <h2>{quote.customer.name}</h2>
+              <p>{quote.customer.tier} customer · {formatMoney(calculation.total)} net value · {calculation.marginPercent.toFixed(1)}% margin</p>
+              <StatusBadge status={quote.stage} />
+            </div>
+            <RiskGauge score={calculation.riskScore} />
+          </section>
+
+          <section className="approval-summary-grid">
+            <article><span><ShieldAlert size={16} /> Maximum variance</span><strong>{calculation.maxExcess.toFixed(1)} pts</strong><small>Above a line-specific ceiling</small></article>
+            <article><span><AlertOctagon size={16} /> Blended excess</span><strong>{calculation.weightedExcess.toFixed(1)} pts</strong><small>Weighted across the order</small></article>
+            <article><span><FileCheck2 size={16} /> Required path</span><strong>{calculation.approvalLevel === 'MANAGER_AND_FINANCE' ? '2 steps' : calculation.approvalLevel === 'MANAGER' ? '1 step' : 'No review'}</strong><small>{calculation.approvalLevel.replaceAll('_', ' ').toLowerCase()}</small></article>
+          </section>
+
+          <Panel title="Policy breakdown" description="Each line is checked against the lower of its customer-tier and category ceiling.">
+            <div className="policy-table-wrap">
+              <table className="data-table policy-table">
+                <thead><tr><th>Line</th><th>Value</th><th>Given</th><th>Allowed</th><th>Variance</th><th>Margin</th></tr></thead>
+                <tbody>
+                  {calculation.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td><strong>{line.product.name}</strong><small>{line.product.category}</small></td>
+                      <td>{formatMoney(line.net)}</td>
+                      <td>{line.discount.toFixed(1)}%</td>
+                      <td>{line.allowedDiscount}%</td>
+                      <td><span className={line.excess > 0 ? 'variance-pill variance-pill--danger' : 'variance-pill'}>{line.excess > 0 ? `+${line.excess.toFixed(1)} pts` : 'Within limit'}</span></td>
+                      <td>{line.marginPercent.toFixed(1)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <div className="approval-bottom-grid">
+            <Panel title="Approval path" description="Only required reviewers are included.">
+              <div className="approval-steps">
+                {quote.approvalSteps.map((step, index) => (
+                  <article className={`approval-step approval-step--${step.status.toLowerCase()}`} key={step.id}>
+                    <span>{step.status === 'APPROVED' ? <Check size={15} /> : step.status === 'PENDING' ? <Clock3 size={15} /> : index + 1}</span>
+                    <div><strong>{step.role}</strong><small>{step.assignee}</small></div>
+                    <b>{step.status.toLowerCase()}</b>
+                  </article>
+                ))}
+                {!quote.approvalSteps.length && <p className="empty-copy">No approval steps were required.</p>}
+              </div>
+            </Panel>
+
+            <Panel title="Decision" description="A reason is mandatory when returning or rejecting.">
+              <textarea className="decision-reason" rows="4" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Add decision context for the audit trail…" disabled={!canAct} />
+              <div className="decision-actions">
+                <button className="button button--quiet" type="button" onClick={() => decide('RETURN')} disabled={!canAct}><CornerUpLeft size={15} /> Return</button>
+                <button className="button button--danger" type="button" onClick={() => decide('REJECT')} disabled={!canAct}><X size={15} /> Reject</button>
+                <button className="button button--success" type="button" onClick={() => decide('APPROVE')} disabled={!canAct}><CheckCircle2 size={15} /> Approve</button>
+              </div>
+              {!canAct && <p className="decision-complete"><CheckCircle2 size={14} /> This quotation has no open reviewer action.</p>}
+            </Panel>
+          </div>
+
+          <Panel title="Audit trail" description="Every policy event, edit and reviewer decision is retained.">
+            <div className="audit-timeline">
+              {quote.audit.map((event) => (
+                <article key={event.id}>
+                  <i />
+                  <div><span><strong>{event.action}</strong><small>{event.time}</small></span><p>{event.detail}</p><small>by {event.actor}</small></div>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      </div>
+    </div>
+  )
+}
+
