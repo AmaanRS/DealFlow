@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { applyCreationRiskWorkflow } from "../controllers/quoteController.js";
 import { calculateQuoteRisk } from "../services/quotePricing.js";
 
 const thresholds = {
@@ -13,6 +14,35 @@ function product(appliedDiscount, productDiscount) {
     product_discount: productDiscount,
   };
 }
+
+test("an explicit draft stays a draft until the sales rep submits it", () => {
+  const result = applyCreationRiskWorkflow({
+    status: "DRAFT",
+    risk: "LOW",
+    approved_by: null,
+  });
+
+  assert.equal(result.status, "DRAFT");
+  assert.equal(result.approved_by, null);
+});
+
+test("submitted LOW risk auto-approves while MEDIUM waits for approval", () => {
+  const low = applyCreationRiskWorkflow({
+    status: "PENDING_APPROVAL",
+    risk: "LOW",
+    approved_by: null,
+  });
+  const medium = applyCreationRiskWorkflow({
+    status: "PENDING_APPROVAL",
+    risk: "MEDIUM",
+    approved_by: null,
+  });
+
+  assert.equal(low.status, "APPROVED");
+  assert.equal(low.approved_by, "AUTO");
+  assert.equal(medium.status, "PENDING_APPROVAL");
+  assert.equal(medium.approved_by, null);
+});
 
 test("line-item discount rule raises risk to MEDIUM", () => {
   const result = calculateQuoteRisk({

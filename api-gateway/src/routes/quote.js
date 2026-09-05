@@ -3,7 +3,14 @@ import { USER_ROLES, USER_STATUSES } from '../constants.js'
 import { config } from '../config.js'
 import { asyncRoute } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
-import { User } from '../models.js'
+import {
+  CategoryDiscount,
+  RISK_CONFIGURATION_ID,
+  RiskConfiguration,
+  TierDiscount,
+  User,
+  effectiveRiskThresholds,
+} from '../models.js'
 import {
   logger,
   requestLogContext,
@@ -89,6 +96,54 @@ export function buildCreateQuotationBody(body, authenticatedUser, reviewer) {
   }
 }
 
+const SALES_EDITABLE_QUOTE_FIELDS = Object.freeze([
+  'customer',
+  'products',
+  'order_discount',
+  'status',
+  'reason',
+  'subscription_details',
+])
+
+export function buildUpdateQuotationBody(body, authenticatedUser, reviewer) {
+  const submittedUpdates =
+    body.updates && typeof body.updates === 'object' && !Array.isArray(body.updates)
+      ? body.updates
+      : {}
+  const updates = Object.fromEntries(
+    Object.entries(submittedUpdates).filter(([field]) =>
+      SALES_EDITABLE_QUOTE_FIELDS.includes(field),
+    ),
+  )
+  const status = updates.status === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL'
+
+  return {
+    quote_id: body.quote_id,
+    ...(body.expected_version === undefined
+      ? {}
+      : { expected_version: body.expected_version }),
+    updates: {
+      ...updates,
+      created_by: authenticatedUser.email,
+      approved_by: null,
+      assigned_to: status === 'DRAFT' ? authenticatedUser.email : reviewer.email,
+      status,
+    },
+  }
+}
+
+async function findActiveManager() {
+  return User.findOne({
+    role: USER_ROLES.MANAGER,
+    status: USER_STATUSES.ACTIVE,
+    is_verified: true,
+    is_deleted: false,
+  })
+    .sort({ createdAt: 1, _id: 1 })
+    .select('email')
+    .lean()
+}
+
 function sendUpstreamResponse(req, res, result, operation) {
   const outcome = result.status < 400 ? 'success' : 'failure'
   setRequestAttributes(req, {
@@ -110,6 +165,48 @@ function sendUpstreamResponse(req, res, result, operation) {
 }
 
 router.use(asyncRoute(requireInternalAuth))
+
+router.get(
+  '/pricing_policy',
+  requireRoles(...quoteReaderRoles),
+  asyncRoute(async (req, res) => {
+    const [tierDiscounts, categoryDiscount, riskConfiguration] =
+      await Promise.all([
+        TierDiscount.find().sort({ discount: 1, tier: 1 }).lean(),
+        CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
+        RiskConfiguration.findById(RISK_CONFIGURATION_ID).lean(),
+      ])
+    const thresholds = effectiveRiskThresholds(riskConfiguration)
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'quote.operation': 'read_pricing_policy',
+      'discount.tier_count': tierDiscounts.length,
+      'discount.category_configured': Boolean(categoryDiscount),
+    })
+
+    res.json({
+      tier_discounts: tierDiscounts.map((discount) => ({
+        tier: discount.tier,
+        discount: discount.discount,
+      })),
+      category_discount: categoryDiscount
+        ? {
+            hardware: categoryDiscount.hardware,
+            service: categoryDiscount.service,
+            subscription: categoryDiscount.subscription,
+          }
+        : null,
+      risk_data: {
+        ...thresholds,
+        line_item_rule: {
+          condition: 'applied_discount > product_discount',
+          minimum_risk: 'MEDIUM',
+        },
+      },
+    })
+  }),
+)
 
 router.get(
   '/get_quotes',
@@ -136,15 +233,7 @@ router.post(
       req.body.status === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL'
     let reviewer = req.auth.user
     if (requestedStatus === 'PENDING_APPROVAL') {
-      reviewer = await User.findOne({
-        role: USER_ROLES.MANAGER,
-        status: USER_STATUSES.ACTIVE,
-        is_verified: true,
-        is_deleted: false,
-      })
-        .sort({ createdAt: 1, _id: 1 })
-        .select('email')
-        .lean()
+      reviewer = await findActiveManager()
 
       if (!reviewer) {
         res.status(409).json({
@@ -163,6 +252,65 @@ router.post(
       setRequestAttributes(req, { 'quote.id': String(result.data.quote._id) })
     }
     sendUpstreamResponse(req, res, result, 'create')
+  }),
+)
+
+router.patch(
+  '/quotation',
+  requireRoles(USER_ROLES.SALES_REP),
+  asyncRoute(async (req, res) => {
+    const body = req.body
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      !body.quote_id ||
+      !body.updates ||
+      typeof body.updates !== 'object' ||
+      Array.isArray(body.updates)
+    ) {
+      res.status(400).json({
+        code: 'INVALID_REQUEST_BODY',
+        message: 'quote_id and an updates object are required.',
+      })
+      return
+    }
+
+    const current = await callQuoteService(
+      req,
+      `/quote/${encodeURIComponent(body.quote_id)}`,
+    )
+    if (current.status >= 400) {
+      sendUpstreamResponse(req, res, current, 'get_for_update')
+      return
+    }
+    if (current.data.quote?.created_by !== req.auth.user.email) {
+      res.status(404).json({
+        code: 'QUOTE_NOT_FOUND',
+        message: 'Quotation not found.',
+      })
+      return
+    }
+
+    const requestedStatus =
+      body.updates.status === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL'
+    let reviewer = req.auth.user
+    if (requestedStatus === 'PENDING_APPROVAL') {
+      reviewer = await findActiveManager()
+      if (!reviewer) {
+        res.status(409).json({
+          code: 'REVIEWER_UNAVAILABLE',
+          message: 'An active sales manager is required before routing a quotation.',
+        })
+        return
+      }
+    }
+
+    const result = await callQuoteService(req, '/quote/quotation', {
+      method: 'PATCH',
+      body: buildUpdateQuotationBody(body, req.auth.user, reviewer),
+    })
+    sendUpstreamResponse(req, res, result, 'update')
   }),
 )
 

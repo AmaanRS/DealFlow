@@ -23,6 +23,10 @@ async function request(path, options = {}) {
 }
 
 export const quoteApi = {
+  getPricingPolicy() {
+    return request(`${QUOTE_BASE_URL}/pricing_policy`)
+  },
+
   list({ page = 1, limit = 100, status } = {}) {
     const query = new URLSearchParams({
       page: String(page),
@@ -39,6 +43,13 @@ export const quoteApi = {
   create(payload) {
     return request(`${QUOTE_BASE_URL}/new_quotation`, {
       method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  update(payload) {
+    return request(`${QUOTE_BASE_URL}/quotation`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },

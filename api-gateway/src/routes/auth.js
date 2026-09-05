@@ -1,6 +1,11 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { REQUESTABLE_ROLES, SESSION_KINDS, USER_STATUSES } from '../constants.js'
+import {
+  REQUESTABLE_ROLES,
+  SESSION_KINDS,
+  USER_ROLES,
+  USER_STATUSES,
+} from '../constants.js'
 import { asyncRoute, parseBody } from '../http.js'
 import { AuditEvent, User } from '../models.js'
 import {
@@ -31,7 +36,7 @@ const registrationSchema = z.object({
   fullName: z.string().trim().min(2).max(80),
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(128),
-  requestedRole: z.enum(REQUESTABLE_ROLES),
+  requestedRole: z.enum(REQUESTABLE_ROLES).optional().default(USER_ROLES.CUSTOMER),
   _custom_json: z
     .object({
       delivery_address: z.string().trim().min(1).max(500),
@@ -79,6 +84,7 @@ export async function createRegistrationRequest(
   } = {},
 ) {
   const emailLower = normalizeEmail(body.email)
+  const requestedRole = body.requestedRole ?? USER_ROLES.CUSTOMER
   const existingUser = await UserModel.findOne({ emailLower })
   const passwordHash = await passwordHasher(body.password)
 
@@ -95,12 +101,12 @@ export async function createRegistrationRequest(
       emailLower,
       passwordHash,
       role: null,
-      requestedRole: body.requestedRole,
+      requestedRole,
       status: USER_STATUSES.PENDING_APPROVAL,
       is_verified: false,
       is_deleted: false,
       _custom_json:
-        body.requestedRole === 'CUSTOMER' ? body._custom_json : null,
+        requestedRole === USER_ROLES.CUSTOMER ? body._custom_json : null,
       approval: {
         requestedAt: submittedAt,
         reviewedAt: null,
@@ -121,12 +127,12 @@ export async function createRegistrationRequest(
   existingUser.email = emailLower
   existingUser.passwordHash = passwordHash
   existingUser.role = null
-  existingUser.requestedRole = body.requestedRole
+  existingUser.requestedRole = requestedRole
   existingUser.status = USER_STATUSES.PENDING_APPROVAL
   existingUser.is_verified = false
   existingUser.is_deleted = false
   existingUser._custom_json =
-    body.requestedRole === 'CUSTOMER' ? body._custom_json : null
+    requestedRole === USER_ROLES.CUSTOMER ? body._custom_json : null
   existingUser.approval = {
     requestedAt: submittedAt,
     reviewedAt: null,

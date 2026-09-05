@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Moon, Sun } from 'lucide-react'
+import { MapPin, Moon, Sun } from 'lucide-react'
 import { authApi } from './api/authApi.js'
 import {
+  CUSTOMER_ROLE_OPTION,
   getRoleLabel,
   INTERNAL_ROLE_OPTIONS,
+  SIGNUP_ROLE_OPTIONS,
   USER_ROLES,
 } from './contracts/auth.js'
 import forgotIllustration from './illustrations/forgot.svg'
@@ -20,7 +22,10 @@ const emptyRegistration = {
   email: '',
   password: '',
   confirmPassword: '',
-  requestedRole: USER_ROLES.SALES_REP,
+  requestedRole: USER_ROLES.CUSTOMER,
+  deliveryAddress: '',
+  lat: '',
+  long: '',
   acceptTerms: false,
 }
 const THEME_STORAGE_KEY = 'dealflow.theme'
@@ -145,7 +150,7 @@ function AuthAside({ mode, state }) {
 }
 
 function PendingApproval({ request, onBack }) {
-  const requestId = request.id ?? request.requestId
+  const isCustomer = request.requestedRole === USER_ROLES.CUSTOMER
   const submittedAt = request.submittedAt
     ? new Intl.DateTimeFormat('en-IN', {
         day: 'numeric',
@@ -161,9 +166,11 @@ function PendingApproval({ request, onBack }) {
         <StatusIcon type="pending" />
       </span>
       <span className="state-eyebrow">Approval pending</span>
-      <h1>Your request is with the administrator.</h1>
+      <h1>Your account request is with the administrator.</h1>
       <p className="state-copy">
-        We will unlock the internal workspace after your requested role is reviewed.
+        {isCustomer
+          ? 'You can sign in after your customer account and delivery details are reviewed.'
+          : 'We will unlock the internal workspace after your requested role is reviewed.'}
       </p>
 
       <dl className="request-summary">
@@ -174,10 +181,6 @@ function PendingApproval({ request, onBack }) {
         <div>
           <dt>Submitted</dt>
           <dd>{submittedAt}</dd>
-        </div>
-        <div>
-          <dt>Request ID</dt>
-          <dd>{requestId}</dd>
         </div>
       </dl>
 
@@ -229,7 +232,7 @@ function RejectedAccess({ rejection, onBack, onRegisterAgain }) {
 
       <div className="notice notice--danger">
         <span aria-hidden="true">!</span>
-        <p><strong>Administrator reason</strong>{rejection.reason}</p>
+        <p><strong>Rejection reason</strong>{rejection.reason}</p>
       </div>
 
       <div className="state-actions">
@@ -364,11 +367,21 @@ function InternalAuth({ theme, onThemeToggle }) {
         return
       }
 
+      const requestedRole =
+        registrationForm.requestedRole || USER_ROLES.CUSTOMER
       const result = await authApi.register({
         fullName: registrationForm.fullName,
         email: registrationForm.email,
         password: registrationForm.password,
-        requestedRole: registrationForm.requestedRole,
+        requestedRole,
+        _custom_json:
+          requestedRole === USER_ROLES.CUSTOMER
+            ? {
+                delivery_address: registrationForm.deliveryAddress.trim(),
+                lat: Number(registrationForm.lat),
+                long: Number(registrationForm.long),
+              }
+            : null,
       })
       setResubmissionContext(null)
       setPendingRequest(result.request)
@@ -417,11 +430,11 @@ function InternalAuth({ theme, onThemeToggle }) {
   }
 
   function registerAgain() {
-    const requestedRole = INTERNAL_ROLE_OPTIONS.some(
+    const requestedRole = SIGNUP_ROLE_OPTIONS.some(
       (role) => role.value === rejectedRequest?.requestedRole,
     )
       ? rejectedRequest.requestedRole
-      : USER_ROLES.SALES_REP
+      : USER_ROLES.CUSTOMER
 
     setRegistrationForm({
       ...emptyRegistration,
@@ -508,7 +521,7 @@ function InternalAuth({ theme, onThemeToggle }) {
                       aria-selected={mode === 'register'}
                       onClick={() => switchMode('register')}
                     >
-                      Request access
+                      Create account
                     </button>
                   </div>
                 )}
@@ -519,21 +532,21 @@ function InternalAuth({ theme, onThemeToggle }) {
                       ? 'Welcome back'
                       : mode === 'forgot'
                         ? 'Account recovery'
-                        : 'Join your sales team'}
+                        : 'Join DealFlow360'}
                   </span>
                   <h1>
                     {mode === 'login'
                       ? 'Sign in to move deals forward.'
                       : mode === 'forgot'
                         ? 'Reset your password securely.'
-                        : 'Request your workspace role.'}
+                        : 'Create your DealFlow account.'}
                   </h1>
                   <p>
                     {mode === 'login'
                       ? 'Use the account approved by your DealFlow360 administrator.'
                       : mode === 'forgot'
                         ? 'Enter your work email and we will accept a password reset request without revealing whether the account exists.'
-                        : 'An administrator reviews every internal account before access is granted.'}
+                        : 'Customer is selected by default. Every new account is reviewed by an administrator before access is granted.'}
                   </p>
                 </div>
 
@@ -566,7 +579,7 @@ function InternalAuth({ theme, onThemeToggle }) {
                   )}
 
                   <label className="field">
-                    <span>Work email</span>
+                    <span>{mode === 'register' ? 'Email address' : 'Work email'}</span>
                     <input
                       name="email"
                       type="email"
@@ -636,7 +649,39 @@ function InternalAuth({ theme, onThemeToggle }) {
                       </label>
 
                       <fieldset className="role-fieldset">
-                        <legend>Requested role</legend>
+                        <legend>How will you use DealFlow360?</legend>
+
+                        <label
+                          className={
+                            registrationForm.requestedRole === USER_ROLES.CUSTOMER
+                              ? 'role-option role-option--customer selected'
+                              : 'role-option role-option--customer'
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name="requestedRole"
+                            value={CUSTOMER_ROLE_OPTION.value}
+                            checked={
+                              registrationForm.requestedRole === USER_ROLES.CUSTOMER
+                            }
+                            onChange={updateRegistration}
+                          />
+                          <span className="role-radio" />
+                          <span className="role-option__copy">
+                            <span className="role-option__heading">
+                              <strong>{CUSTOMER_ROLE_OPTION.label}</strong>
+                              <span className="role-default-badge">Default</span>
+                            </span>
+                            <small>{CUSTOMER_ROLE_OPTION.description}</small>
+                          </span>
+                        </label>
+
+                        <div className="role-choice-divider">
+                          <span>Or request internal team access</span>
+                          <small>Choose one only if you work inside DealFlow360.</small>
+                        </div>
+
                         <div className="role-options">
                           {INTERNAL_ROLE_OPTIONS.map((role) => (
                             <label
@@ -663,6 +708,66 @@ function InternalAuth({ theme, onThemeToggle }) {
                           ))}
                         </div>
                       </fieldset>
+
+                      {registrationForm.requestedRole === USER_ROLES.CUSTOMER && (
+                        <section
+                          className="customer-details"
+                          aria-labelledby="delivery-details-title"
+                        >
+                          <header>
+                            <span className="customer-details__icon" aria-hidden="true">
+                              <MapPin size={17} />
+                            </span>
+                            <span>
+                              <strong id="delivery-details-title">Delivery details</strong>
+                              <small>Used to find the nearest fulfilment store.</small>
+                            </span>
+                          </header>
+
+                          <label className="field">
+                            <span>Delivery address</span>
+                            <textarea
+                              name="deliveryAddress"
+                              value={registrationForm.deliveryAddress}
+                              onChange={updateRegistration}
+                              placeholder="Building, street, city, state and postal code"
+                              rows={3}
+                              required
+                            />
+                          </label>
+
+                          <div className="customer-coordinate-grid">
+                            <label className="field">
+                              <span>Latitude</span>
+                              <input
+                                name="lat"
+                                type="number"
+                                value={registrationForm.lat}
+                                onChange={updateRegistration}
+                                placeholder="19.0760"
+                                min="-90"
+                                max="90"
+                                step="any"
+                                required
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Longitude</span>
+                              <input
+                                name="long"
+                                type="number"
+                                value={registrationForm.long}
+                                onChange={updateRegistration}
+                                placeholder="72.8777"
+                                min="-180"
+                                max="180"
+                                step="any"
+                                required
+                              />
+                            </label>
+                          </div>
+                        </section>
+                      )}
                     </>
                   )}
 
@@ -716,7 +821,9 @@ function InternalAuth({ theme, onThemeToggle }) {
                         ? 'Sign in securely'
                         : mode === 'forgot'
                           ? 'Request password reset'
-                          : 'Submit access request'}
+                          : registrationForm.requestedRole === USER_ROLES.CUSTOMER
+                            ? 'Submit customer registration'
+                            : 'Submit access request'}
                   </button>
                 </form>
               </div>

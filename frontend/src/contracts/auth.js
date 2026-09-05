@@ -3,6 +3,7 @@ export const USER_ROLES = Object.freeze({
   SALES_REP: 'SALES_REP',
   MANAGER: 'MANAGER',
   FINANCE: 'FINANCE',
+  CUSTOMER: 'CUSTOMER',
 })
 
 export const USER_STATUSES = Object.freeze({
@@ -33,6 +34,18 @@ export const INTERNAL_ROLE_OPTIONS = Object.freeze([
   },
 ])
 
+export const CUSTOMER_ROLE_OPTION = Object.freeze({
+  value: USER_ROLES.CUSTOMER,
+  label: 'Customer',
+  shortLabel: 'Customer',
+  description: 'Receive quotations and manage purchases for your organization.',
+})
+
+export const SIGNUP_ROLE_OPTIONS = Object.freeze([
+  CUSTOMER_ROLE_OPTION,
+  ...INTERNAL_ROLE_OPTIONS,
+])
+
 export const AUTH_ENDPOINTS = Object.freeze({
   register: '/v1/api/user/auth/signup',
   login: '/v1/api/user/auth/login',
@@ -43,8 +56,13 @@ export const AUTH_ENDPOINTS = Object.freeze({
   approveUser: '/v1/api/admin/approve_user',
   registrationDecision: (requestId) =>
     `/v1/api/admin/registration-requests/${encodeURIComponent(requestId)}`,
+  discountPolicy: '/v1/api/admin/discount_policy',
   createTierDiscount: '/v1/api/admin/create_tier_discount',
+  updateTierDiscount: '/v1/api/admin/tier_discount',
   createCategoryDiscount: '/v1/api/admin/create_category_discount',
+  updateCategoryDiscount: '/v1/api/admin/category_discount',
+  riskData: '/v1/api/admin/risks_data',
+  configureRisk: '/v1/api/admin/configure_risk',
   portalSession: '/api/v1/portal/session',
   portalLogout: '/api/v1/portal/logout',
   portalInvitations: '/api/v1/portal/invitations',
@@ -52,5 +70,5 @@ export const AUTH_ENDPOINTS = Object.freeze({
 
 export function getRoleLabel(role) {
   if (role === USER_ROLES.ADMIN) return 'Administrator'
-  return INTERNAL_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role
+  return SIGNUP_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role
 }

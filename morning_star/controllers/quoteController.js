@@ -238,17 +238,20 @@ function normalizeQuoteInput(input) {
 }
 
 export function applyCreationRiskWorkflow(pricedQuotation) {
-  const isDraft = pricedQuotation.status === "DRAFT";
-  const isLowRisk = pricedQuotation.risk === "LOW";
-  let status = "PENDING_APPROVAL";
+  if (pricedQuotation.status === "DRAFT") {
+    return normalizeQuoteInput({
+      ...pricedQuotation,
+      status: "DRAFT",
+      approved_by: null,
+    });
+  }
 
-  if (isDraft) status = "DRAFT";
-  else if (isLowRisk) status = "APPROVED";
+  const isLowRisk = pricedQuotation.risk === "LOW";
 
   return normalizeQuoteInput({
     ...pricedQuotation,
-    status,
-    approved_by: !isDraft && isLowRisk ? AUTO_APPROVER : null,
+    status: isLowRisk ? "APPROVED" : "PENDING_APPROVAL",
+    approved_by: isLowRisk ? AUTO_APPROVER : null,
   });
 }
 
@@ -776,9 +779,14 @@ export async function updateQuotation(req, res) {
     currentQuote.status === "NEGOTIATION"
       ? inventoryByArticle(currentQuote.products)
       : new Map();
-  const nextValues = normalizeQuoteInput(
-    await priceQuotation(nextIntent, { inventoryCredits }),
-  );
+  const pricedNextValues = await priceQuotation(nextIntent, {
+    inventoryCredits,
+  });
+  const nextValues = ["DRAFT", "PENDING_APPROVAL"].includes(
+    nextIntent.status,
+  )
+    ? applyCreationRiskWorkflow(pricedNextValues)
+    : normalizeQuoteInput(pricedNextValues);
 
   const acquired = await Quote.updateOne(
     { _id: currentQuote._id, is_latest_quote: true },

@@ -3,9 +3,12 @@ import { after, test } from 'node:test'
 import { USER_ROLES } from '@app/models/constants'
 
 await import('../src/config.js')
-const { appendQuery, buildCreateQuotationBody, default: quoteRoutes } = await import(
-  '../src/routes/quote.js'
-)
+const {
+  appendQuery,
+  buildCreateQuotationBody,
+  buildUpdateQuotationBody,
+  default: quoteRoutes,
+} = await import('../src/routes/quote.js')
 const { shutdownObservability } = await import('@app/observability')
 
 after(() => shutdownObservability())
@@ -16,10 +19,19 @@ test('quotation read endpoints are registered on the gateway', () => {
     .map((layer) => layer.route.path)
 
   assert.deepEqual(paths, [
+    '/pricing_policy',
     '/get_quotes',
     '/approved_quotes',
     '/:quote_id',
   ])
+})
+
+test('quotation draft updates and submission are registered on the gateway', () => {
+  const route = quoteRoutes.stack.find(
+    (layer) => layer.route?.path === '/quotation',
+  )?.route
+
+  assert.equal(route?.methods.patch, true)
 })
 
 test('sales quotation creation is registered on the gateway', () => {
@@ -48,6 +60,36 @@ test('quotation creation trusts session ownership and gateway reviewer assignmen
   assert.equal(body.assigned_to, 'manager@example.com')
   assert.equal(body.approved_by, null)
   assert.equal(body.status, 'PENDING_APPROVAL')
+})
+
+test('quotation updates keep only sales-editable fields and trusted ownership', () => {
+  const body = buildUpdateQuotationBody(
+    {
+      quote_id: '507f1f77bcf86cd799439011',
+      expected_version: 1,
+      updates: {
+        order_discount: 7,
+        status: 'PENDING_APPROVAL',
+        risk: 'LOW',
+        created_by: 'forged@example.com',
+        assigned_to: 'forged@example.com',
+      },
+    },
+    { email: 'sales@example.com' },
+    { email: 'manager@example.com' },
+  )
+
+  assert.deepEqual(body, {
+    quote_id: '507f1f77bcf86cd799439011',
+    expected_version: 1,
+    updates: {
+      order_discount: 7,
+      status: 'PENDING_APPROVAL',
+      created_by: 'sales@example.com',
+      approved_by: null,
+      assigned_to: 'manager@example.com',
+    },
+  })
 })
 
 test('sales representatives can only list quotations they created', () => {

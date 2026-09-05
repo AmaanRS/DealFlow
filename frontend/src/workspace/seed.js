@@ -217,15 +217,8 @@ export const initialQuotes = [
   },
 ]
 
-export const dashboardTrend = [
-  { period: 'Mon', revenue: 640, margin: 31 },
-  { period: 'Tue', revenue: 790, margin: 32 },
-  { period: 'Wed', revenue: 720, margin: 29 },
-  { period: 'Thu', revenue: 980, margin: 34 },
-  { period: 'Fri', revenue: 1150, margin: 36 },
-  { period: 'Sat', revenue: 920, margin: 35 },
-  { period: 'Sun', revenue: 1280, margin: 37 },
-]
+// `dashboardTrend` was removed with the seeded revenue chart. The dashboard now
+// derives every figure it shows from the quotations returned by Morning Star.
 
 export const warehouseData = [
   {
@@ -257,20 +250,9 @@ export const warehouseData = [
   },
 ]
 
-export const subscriptionPlans = [
-  { id: 'plan-monthly', name: 'Monthly Flex', cadence: 'Monthly', proration: 'Daily', cancellation: 'Credit unused days', activeProducts: 2 },
-  { id: 'plan-quarterly', name: 'Quarterly Commit', cadence: 'Quarterly', proration: 'Daily', cancellation: 'Credit next invoice', activeProducts: 1 },
-  { id: 'plan-yearly', name: 'Annual Advantage', cadence: 'Yearly', proration: 'Monthly', cancellation: 'Approval required', activeProducts: 3 },
-]
-
-export const reportRows = [
-  { month: 'April', quotations: 42, won: 18, revenue: 3240000, avgDiscount: 7.2, margin: 31.4 },
-  { month: 'May', quotations: 48, won: 23, revenue: 3980000, avgDiscount: 7.8, margin: 30.9 },
-  { month: 'June', quotations: 51, won: 27, revenue: 4470000, avgDiscount: 8.1, margin: 32.5 },
-  { month: 'July', quotations: 57, won: 31, revenue: 5140000, avgDiscount: 7.4, margin: 34.1 },
-  { month: 'August', quotations: 62, won: 36, revenue: 5960000, avgDiscount: 8.6, margin: 33.8 },
-  { month: 'September', quotations: 38, won: 19, revenue: 4260000, avgDiscount: 8.2, margin: 35.2 },
-]
+// `subscriptionPlans` and `reportRows` were removed with the seeded Reports
+// page and the invented recurring-plan tab. Subscriptions are now real products
+// carrying the SUBSCRIPTION category, read from the catalogue endpoint.
 
 export const upsellSuggestions = [
   { id: 'suggest-dock', productId: 'prod-dock', reason: 'Added in 72% of similar laptop deals', marginDelta: 7700, promoted: true },

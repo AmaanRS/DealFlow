@@ -1,19 +1,21 @@
 import { lazy, Suspense, useState } from 'react'
 import {
   BadgeIndianRupee,
+  BadgePercent,
   Boxes,
   ChartNoAxesCombined,
   ClipboardCheck,
-  FileChartColumn,
   FileText,
-  KanbanSquare,
   LogOut,
   Menu,
   Moon,
+  PackagePlus,
   Plus,
-  Settings2,
+  RefreshCw,
+  ShieldAlert,
   Sun,
   UserRoundCheck,
+  Warehouse,
   X,
 } from 'lucide-react'
 import {
@@ -25,7 +27,7 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import { Toaster, toast } from 'sonner'
+import { Toaster } from 'sonner'
 import { USER_ROLES } from '../contracts/auth.js'
 import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx'
 import { Avatar } from './components/Ui.jsx'
@@ -36,10 +38,51 @@ const BillingPage = lazy(() => import('./pages/BillingPage.jsx'))
 const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage.jsx'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'))
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage.jsx'))
-const PipelinePage = lazy(() => import('./pages/PipelinePage.jsx'))
 const QuotationBuilderPage = lazy(() => import('./pages/QuotationBuilderPage.jsx'))
 const QuotationsPage = lazy(() => import('./pages/QuotationsPage.jsx'))
-const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'))
+
+/**
+ * Every configuration surface is a first-class sidebar entry rather than a tab
+ * inside one page, so an administrator's whole navigation is a list of screens
+ * backed by live endpoints. `section` is the prop handed to ConfigurationPage.
+ */
+const CONFIGURATION_LINKS = [
+  {
+    to: '/configuration/products',
+    section: 'products',
+    label: 'Products & inventory',
+    icon: PackagePlus,
+    roles: [USER_ROLES.ADMIN],
+  },
+  {
+    to: '/configuration/subscriptions',
+    section: 'subscriptions',
+    label: 'Subscriptions',
+    icon: RefreshCw,
+    roles: [USER_ROLES.ADMIN],
+  },
+  {
+    to: '/configuration/stores',
+    section: 'stores',
+    label: 'Stores',
+    icon: Warehouse,
+    roles: [USER_ROLES.ADMIN],
+  },
+  {
+    to: '/configuration/discounts',
+    section: 'discounts',
+    label: 'Discount policy',
+    icon: BadgePercent,
+    roles: [USER_ROLES.ADMIN, USER_ROLES.MANAGER],
+  },
+  {
+    to: '/configuration/risk',
+    section: 'risk',
+    label: 'Risk thresholds',
+    icon: ShieldAlert,
+    roles: [USER_ROLES.ADMIN],
+  },
+]
 
 const navigation = [
   {
@@ -48,7 +91,7 @@ const navigation = [
       to: '/dashboard',
       label: 'Overview',
       icon: ChartNoAxesCombined,
-      roles: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+      roles: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER],
     }],
   },
   {
@@ -58,12 +101,6 @@ const navigation = [
         to: '/quotations',
         label: 'Quotations',
         icon: FileText,
-        roles: [USER_ROLES.SALES_REP],
-      },
-      {
-        to: '/pipeline',
-        label: 'Pipeline',
-        icon: KanbanSquare,
         roles: [USER_ROLES.SALES_REP],
       },
       {
@@ -92,28 +129,15 @@ const navigation = [
     ],
   },
   {
-    label: 'Manage',
-    links: [
-      {
-        to: '/configuration',
-        label: 'Configuration',
-        icon: Settings2,
-        roles: [USER_ROLES.MANAGER, USER_ROLES.ADMIN],
-      },
-      {
-        to: '/reports',
-        label: 'Reports',
-        icon: FileChartColumn,
-        roles: [USER_ROLES.MANAGER, USER_ROLES.FINANCE, USER_ROLES.ADMIN],
-      },
-    ],
+    label: 'Sales back-end',
+    links: CONFIGURATION_LINKS,
   },
   {
     label: 'Administration',
     links: [
       {
         to: '/admin/users',
-        label: 'User approvals',
+        label: 'Access requests',
         icon: UserRoundCheck,
         roles: [USER_ROLES.ADMIN],
       },
@@ -124,29 +148,24 @@ const navigation = [
 const routeTitles = {
   dashboard: 'Overview',
   quotations: 'Quotations',
-  pipeline: 'Sales pipeline',
   approvals: 'Discount approvals',
   fulfillment: 'Warehouse fulfillment',
   billing: 'Subscriptions & billing',
   configuration: 'Back-end configuration',
-  admin: 'User administration',
-  reports: 'Sales reporting',
+  admin: 'Access requests',
 }
 
 const routeRoles = {
-  dashboard: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER, USER_ROLES.ADMIN],
+  dashboard: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER],
   quotations: [USER_ROLES.SALES_REP],
-  pipeline: [USER_ROLES.SALES_REP],
   approvals: [USER_ROLES.MANAGER, USER_ROLES.FINANCE],
   fulfillment: [USER_ROLES.SALES_REP, USER_ROLES.FINANCE],
   billing: [USER_ROLES.FINANCE],
-  configuration: [USER_ROLES.MANAGER, USER_ROLES.ADMIN],
-  reports: [USER_ROLES.MANAGER, USER_ROLES.FINANCE, USER_ROLES.ADMIN],
   admin: [USER_ROLES.ADMIN],
 }
 
 const homeByRole = {
-  [USER_ROLES.ADMIN]: '/configuration',
+  [USER_ROLES.ADMIN]: '/configuration/products',
   [USER_ROLES.MANAGER]: '/dashboard',
   [USER_ROLES.FINANCE]: '/approvals',
   [USER_ROLES.SALES_REP]: '/dashboard',
@@ -171,11 +190,19 @@ function WorkspaceShell({ onLogout, theme, onThemeToggle }) {
   const homePath = homeByRole[user.role] ?? '/dashboard'
   const canCreateQuote = user.role === USER_ROLES.SALES_REP
   const routeAllowed = (route) => routeRoles[route]?.includes(user.role)
+  const configurationLinks = CONFIGURATION_LINKS.filter((link) =>
+    link.roles.includes(user.role),
+  )
+  // Configuration routes all share the same first path segment, so the topbar
+  // title comes from the matched sidebar entry instead of the segment.
+  const pageTitle =
+    CONFIGURATION_LINKS.find((link) => link.to === location.pathname)?.label ??
+    routeTitles[section] ??
+    'Workspace'
 
   function startQuote() {
     const id = createQuote()
     navigate(`/quotations/${id}`)
-    toast.success('Quotation draft created')
   }
 
   async function closeWorkspace() {
@@ -269,7 +296,7 @@ function WorkspaceShell({ onLogout, theme, onThemeToggle }) {
               </button>
             )}
             <span>DealFlow360</span>
-            <strong>{routeTitles[section] ?? 'Workspace'}</strong>
+            <strong>{pageTitle}</strong>
           </div>
 
           <div className="workspace-topbar__actions">
@@ -298,21 +325,31 @@ function WorkspaceShell({ onLogout, theme, onThemeToggle }) {
               <Route path="/dashboard" element={routeAllowed('dashboard') ? <DashboardPage /> : <Navigate to={homePath} replace />} />
               <Route path="/quotations" element={routeAllowed('quotations') ? <QuotationsPage /> : <Navigate to={homePath} replace />} />
               <Route path="/quotations/:quoteId" element={routeAllowed('quotations') ? <QuotationBuilderPage /> : <Navigate to={homePath} replace />} />
-              <Route path="/pipeline" element={routeAllowed('pipeline') ? <PipelinePage /> : <Navigate to={homePath} replace />} />
               <Route path="/approvals" element={routeAllowed('approvals') ? <ApprovalsPage /> : <Navigate to={homePath} replace />} />
               <Route path="/approvals/:quoteId" element={routeAllowed('approvals') ? <ApprovalsPage /> : <Navigate to={homePath} replace />} />
               <Route path="/fulfillment" element={routeAllowed('fulfillment') ? <FulfillmentPage /> : <Navigate to={homePath} replace />} />
               <Route path="/billing" element={routeAllowed('billing') ? <BillingPage /> : <Navigate to={homePath} replace />} />
-              <Route path="/configuration" element={routeAllowed('configuration') ? <ConfigurationPage initialTab={user.role === USER_ROLES.MANAGER ? 'discounts' : 'products'} /> : <Navigate to={homePath} replace />} />
+              {/* One route per configuration surface, each gated by the same
+                  role list that decides whether its sidebar entry is rendered. */}
+              <Route
+                path="/configuration"
+                element={<Navigate to={configurationLinks[0]?.to ?? homePath} replace />}
+              />
+              {CONFIGURATION_LINKS.map(({ to, section: configSection, roles }) => (
+                <Route
+                  key={to}
+                  path={to}
+                  element={roles.includes(user.role)
+                    ? <ConfigurationPage section={configSection} />
+                    : <Navigate to={homePath} replace />}
+                />
+              ))}
               <Route
                 path="/admin/users"
-                element={
-                  user.role === USER_ROLES.ADMIN
-                    ? <ConfigurationPage initialTab="access" />
-                    : <Navigate to="/dashboard" replace />
-                }
+                element={routeAllowed('admin')
+                  ? <ConfigurationPage section="access" />
+                  : <Navigate to={homePath} replace />}
               />
-              <Route path="/reports" element={routeAllowed('reports') ? <ReportsPage /> : <Navigate to={homePath} replace />} />
               <Route path="*" element={<Navigate to={homePath} replace />} />
             </Routes>
           </Suspense>

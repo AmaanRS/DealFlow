@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { quoteApi } from '../api/quoteApi.js'
 import { USER_ROLES } from '../contracts/auth.js'
 import { calculateQuote } from './dealMath.js'
+import { MOVABLE_STAGES } from './quoteStages.js'
 
 const WorkspaceContext = createContext(null)
 
@@ -92,12 +93,14 @@ function toWorkspaceQuote(quote, user) {
         sku: product.hsn,
         name: product.name,
         category: displayCategory(product.category),
+        categoryCode: product.category,
         price: product.unit_price,
         cost: null,
         unit: 'Unit',
         tax: product.gst,
         stock: null,
         discountLimit: product.product_discount,
+        categoryDiscount: product.category_discount,
         description: `HSN ${product.hsn}`,
       },
     })),
@@ -130,17 +133,25 @@ function createAudit(actor, action, detail) {
   }
 }
 
+const QUOTES_PAGE_SIZE = 20
+
 export function WorkspaceProvider({ children, user }) {
   const [quotes, setQuotes] = useState([])
   const [quotesLoading, setQuotesLoading] = useState(true)
   const [quotesError, setQuotesError] = useState(null)
+  const [quotesPage, setQuotesPage] = useState(1)
+  const [quotesTotalPages, setQuotesTotalPages] = useState(1)
+  const [quotesLoadingMore, setQuotesLoadingMore] = useState(false)
+  const hasMoreQuotes = quotesPage < quotesTotalPages
 
   const refreshQuotes = useCallback(async () => {
     setQuotesLoading(true)
     setQuotesError(null)
     try {
-      const result = await quoteApi.list()
+      const result = await quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
       setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+      setQuotesPage(result.pagination?.page ?? 1)
+      setQuotesTotalPages(result.pagination?.total_pages ?? 1)
     } catch (error) {
       setQuotes([])
       setQuotesError(error)
@@ -149,14 +160,42 @@ export function WorkspaceProvider({ children, user }) {
     }
   }, [user])
 
+  /**
+   * Append the next page. Locally created drafts have no server id yet, so they
+   * are preserved across appends, and any quote the page returns that is already
+   * on screen is de-duplicated rather than added twice.
+   */
+  const loadMoreQuotes = useCallback(async () => {
+    if (quotesLoadingMore || quotesLoading) return
+    if (quotesPage >= quotesTotalPages) return
+
+    setQuotesLoadingMore(true)
+    try {
+      const nextPage = quotesPage + 1
+      const result = await quoteApi.list({ page: nextPage, limit: QUOTES_PAGE_SIZE })
+      const incoming = (result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user))
+      setQuotes((current) => {
+        const seen = new Set(current.map((quote) => quote.id))
+        return [...current, ...incoming.filter((quote) => !seen.has(quote.id))]
+      })
+      setQuotesPage(result.pagination?.page ?? nextPage)
+      setQuotesTotalPages(result.pagination?.total_pages ?? quotesTotalPages)
+    } catch (error) {
+      setQuotesError(error)
+    } finally {
+      setQuotesLoadingMore(false)
+    }
+  }, [quotesLoading, quotesLoadingMore, quotesPage, quotesTotalPages, user])
+
   useEffect(() => {
     let active = true
 
-    quoteApi.list()
+    quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
       .then((result) => {
-        if (active) {
-          setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
-        }
+        if (!active) return
+        setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+        setQuotesPage(result.pagination?.page ?? 1)
+        setQuotesTotalPages(result.pagination?.total_pages ?? 1)
       })
       .catch((error) => {
         if (active) setQuotesError(error)
@@ -194,6 +233,7 @@ export function WorkspaceProvider({ children, user }) {
     const quote = {
       id,
       serverManaged: false,
+      isUnsaved: true,
       customer: { id: '', name: 'Select a customer', email: '', tier: '' },
       rep: user.fullName,
       stage: 'DRAFT',
@@ -204,9 +244,9 @@ export function WorkspaceProvider({ children, user }) {
       orderDiscount: 0,
       lines: [],
       approvalSteps: [],
-      audit: [createAudit(user.fullName, 'Draft created', 'New quotation started.')],
+      audit: [createAudit(user.fullName, 'Working copy opened', 'Not saved yet.')],
     }
-    commit([quote, ...quotes])
+    commit([quote, ...quotes.filter((item) => !item.isUnsaved)])
     return id
   }
 
@@ -249,10 +289,10 @@ export function WorkspaceProvider({ children, user }) {
     }))
   }
 
-  async function submitQuote(quoteId) {
+  async function submitQuote(quoteId, status = 'PENDING_APPROVAL') {
     const quote = quotes.find((item) => item.id === quoteId)
     if (!quote) return null
-    const result = await quoteApi.create({
+    const updates = {
       customer: quote.customer.id,
       products: quote.lines.map((line) => ({
         article_id: line.product.articleId,
@@ -261,18 +301,70 @@ export function WorkspaceProvider({ children, user }) {
         applied_discount: line.discount,
       })),
       order_discount: quote.orderDiscount,
-      status: 'PENDING_APPROVAL',
+      status,
       reason: null,
       subscription_details: [],
-    })
+    }
+    const result = quote.serverManaged && quote.stage === 'DRAFT'
+      ? await quoteApi.update({ quote_id: quote.id, updates })
+      : await quoteApi.create(updates)
     const persistedQuote = toWorkspaceQuote(result.quote, user)
     setQuotes((current) => [
       persistedQuote,
-      ...current.filter((item) => item.id !== quoteId && item.id !== persistedQuote.id),
+      ...current.filter(
+        (item) => item.id !== quoteId && item.id !== persistedQuote.id && !item.isUnsaved,
+      ),
     ])
     return {
       quote: persistedQuote,
       calculation: calculateQuote(persistedQuote),
+    }
+  }
+
+  /**
+   * Move a quotation to another board column.
+   *
+   * The gateway only lets a sales rep write DRAFT or PENDING_APPROVAL on their
+   * own quote — APPROVED belongs to the approval chain, NEGOTIATION to the
+   * customer portal and COMPLETED to billing — so only those two columns accept
+   * a drop. The card is moved optimistically and rolled back if the write fails.
+   */
+  async function moveQuote(quoteId, nextStage) {
+    const quote = quotes.find((item) => item.id === quoteId)
+    if (!quote || quote.stage === nextStage) return null
+    if (!MOVABLE_STAGES.includes(nextStage)) {
+      throw Object.assign(new Error(`${nextStage} is not a stage you can move a quotation into.`), {
+        code: 'STAGE_NOT_MOVABLE',
+      })
+    }
+    if (!quote.serverManaged) {
+      throw Object.assign(new Error('Save this draft before moving it on the board.'), {
+        code: 'QUOTE_NOT_SAVED',
+      })
+    }
+
+    const previousStage = quote.stage
+    setQuotes((current) => current.map((item) =>
+      item.id === quoteId ? { ...item, stage: nextStage } : item,
+    ))
+
+    try {
+      const result = await quoteApi.update({
+        quote_id: quoteId,
+        updates: { status: nextStage },
+      })
+      const persisted = toWorkspaceQuote(result.quote, user)
+      // A revision is a new document, so swap the old id out rather than patch it.
+      setQuotes((current) => [
+        persisted,
+        ...current.filter((item) => item.id !== quoteId && item.id !== persisted.id),
+      ])
+      return persisted
+    } catch (error) {
+      setQuotes((current) => current.map((item) =>
+        item.id === quoteId ? { ...item, stage: previousStage } : item,
+      ))
+      throw error
     }
   }
 
@@ -328,7 +420,11 @@ export function WorkspaceProvider({ children, user }) {
     quotes,
     quotesLoading,
     quotesError,
+    quotesLoadingMore,
+    hasMoreQuotes,
+    loadMoreQuotes,
     refreshQuotes,
+    moveQuote,
     updateQuote,
     createQuote,
     addProduct,
