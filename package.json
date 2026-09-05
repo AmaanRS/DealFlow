@@ -5,6 +5,7 @@
     "api-gateway",
     "emails",
     "frontend",
+    "night_sky",
     "observability"
   ],
   "dependencies": {

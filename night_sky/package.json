@@ -1,0 +1,19 @@
+{
+  "name": "night_sky",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --import @app/observability/register app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@app/observability": "^1.0.0",
+    "convict": "^6.2.5",
+    "express": "^5.2.1",
+    "mongoose": "^9.9.5"
+  }
+}
