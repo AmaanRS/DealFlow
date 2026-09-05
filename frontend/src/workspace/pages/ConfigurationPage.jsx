@@ -6,12 +6,9 @@ import {
   CircleDollarSign,
   Layers3,
   PackagePlus,
-  Plus,
   RefreshCw,
   Save,
-  Settings2,
   ShieldCheck,
-  Sparkles,
   Users,
   Warehouse,
   X,
@@ -19,24 +16,21 @@ import {
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { authApi } from '../../api/authApi.js'
-import { formatMoney } from '../dealMath.js'
 import {
   discountRules as seededDiscountRules,
   products as seededProducts,
   subscriptionPlans as seededPlans,
-  upsellSuggestions,
   warehouseData as seededWarehouses,
 } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatusBadge } from '../components/Ui.jsx'
 
 const tabs = [
-  { id: 'products', label: 'Products & prices', icon: PackagePlus },
-  { id: 'discounts', label: 'Discount policy', icon: BadgePercent },
-  { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
-  { id: 'plans', label: 'Recurring plans', icon: RefreshCw },
-  { id: 'recommendations', label: 'Recommendations', icon: Sparkles },
-  { id: 'access', label: 'Access requests', icon: Users },
+  { id: 'products', label: 'Products & prices', icon: PackagePlus, roles: ['ADMIN'] },
+  { id: 'discounts', label: 'Discount policy', icon: BadgePercent, roles: ['ADMIN', 'MANAGER'] },
+  { id: 'warehouses', label: 'Warehouses', icon: Warehouse, roles: ['ADMIN'] },
+  { id: 'plans', label: 'Recurring plans', icon: RefreshCw, roles: ['ADMIN'] },
+  { id: 'access', label: 'Access requests', icon: Users, roles: ['ADMIN'] },
 ]
 
 function ProductsConfiguration({ products, setProducts }) {
@@ -45,7 +39,7 @@ function ProductsConfiguration({ products, setProducts }) {
   }
 
   return (
-    <Panel title="Product catalogue" description="Core commercial details, variants and price-list coverage." action={<button className="button button--primary button--small" type="button" onClick={() => toast.info('Product form is ready for API wiring')}><Plus size={14} /> Add product</button>}>
+    <Panel title="Product catalogue" description="Core commercial details, variants and price-list coverage.">
       <div className="configuration-summary">
         <span><Boxes size={17} /><strong>{products.length}</strong><small>Active products</small></span>
         <span><Layers3 size={17} /><strong>3</strong><small>Customer price lists</small></span>
@@ -157,14 +151,13 @@ function DiscountConfiguration({
 
 function WarehouseConfiguration({ warehouses }) {
   return (
-    <Panel title="Warehouse network" description="Stock, replenishment and cost weighting used by auto-split logic." action={<button className="button button--primary button--small" type="button" onClick={() => toast.info('Warehouse form opened')}><Plus size={14} /> Add warehouse</button>}>
+    <Panel title="Warehouse network" description="Stock, replenishment and cost weighting used by auto-split logic.">
       <div className="warehouse-config-grid">
         {warehouses.map((warehouse) => (
           <article key={warehouse.id}>
             <header><span><Warehouse size={18} /></span><div><strong>{warehouse.name}</strong><small>{warehouse.city} · {warehouse.serviceLevel}</small></div><StatusBadge status="APPROVED" label="Active" /></header>
             <dl><div><dt>Utilization</dt><dd>{warehouse.utilization}%</dd></div><div><dt>Shipping weight</dt><dd>{warehouse.shippingWeight.toFixed(2)}×</dd></div><div><dt>Tracked SKUs</dt><dd>{Object.keys(warehouse.stock).length}</dd></div></dl>
             <div className="warehouse-utilization"><i><b style={{ width: `${warehouse.utilization}%` }} /></i><small>Replenishment rules healthy</small></div>
-            <button className="button button--quiet button--full" type="button" onClick={() => toast.info(`${warehouse.name} configuration opened`)}><Settings2 size={14} /> Manage stock rules</button>
           </article>
         ))}
       </div>
@@ -174,25 +167,12 @@ function WarehouseConfiguration({ warehouses }) {
 
 function PlanConfiguration({ plans }) {
   return (
-    <Panel title="Subscription plans" description="Cadence, proration, cancellation and refund behavior." action={<button className="button button--primary button--small" type="button" onClick={() => toast.info('Recurring plan form opened')}><Plus size={14} /> New plan</button>}>
+    <Panel title="Subscription plans" description="Cadence, proration, cancellation and refund behavior.">
       <div className="plan-config-list">
         {plans.map((plan) => (
-          <article key={plan.id}><span className="plan-icon"><RefreshCw size={17} /></span><div><span><strong>{plan.name}</strong><StatusBadge status="APPROVED" label="Active" /></span><small>{plan.activeProducts} linked products</small></div><dl><div><dt>Cadence</dt><dd>{plan.cadence}</dd></div><div><dt>Proration</dt><dd>{plan.proration}</dd></div><div><dt>Cancellation</dt><dd>{plan.cancellation}</dd></div></dl><button className="icon-button" type="button" aria-label={`Edit ${plan.name}`}><Settings2 size={16} /></button></article>
+          <article key={plan.id}><span className="plan-icon"><RefreshCw size={17} /></span><div><span><strong>{plan.name}</strong><StatusBadge status="APPROVED" label="Active" /></span><small>{plan.activeProducts} linked products</small></div><dl><div><dt>Cadence</dt><dd>{plan.cadence}</dd></div><div><dt>Proration</dt><dd>{plan.proration}</dd></div><div><dt>Cancellation</dt><dd>{plan.cancellation}</dd></div></dl></article>
         ))}
       </div>
-    </Panel>
-  )
-}
-
-function RecommendationConfiguration() {
-  return (
-    <Panel title="Upsell & cross-sell rules" description="Only relevant pairings above the configured margin threshold surface to reps.">
-      <div className="recommendation-config-list">
-        {upsellSuggestions.map((suggestion) => (
-          <article key={suggestion.id}><span><Sparkles size={17} /></span><div><strong>{suggestion.reason}</strong><small>Minimum margin contribution {formatMoney(suggestion.marginDelta)}</small></div><label className="switch"><input type="checkbox" defaultChecked /><i /></label></article>
-        ))}
-      </div>
-      <label className="threshold-control"><span><strong>Global minimum margin delta</strong><small>Suggestions below this contribution stay hidden.</small></span><span>₹<input type="number" defaultValue="5000" /></span></label>
     </Panel>
   )
 }
@@ -280,7 +260,11 @@ function AccessRequests({
 
 export default function ConfigurationPage({ initialTab = 'products' }) {
   const { user } = useWorkspace()
-  const [activeTab, setActiveTab] = useState(initialTab)
+  const visibleTabs = tabs.filter((tab) => tab.roles.includes(user.role))
+  const defaultTab = visibleTabs.some((tab) => tab.id === initialTab)
+    ? initialTab
+    : visibleTabs[0]?.id
+  const [activeTab, setActiveTab] = useState(defaultTab)
   const [products, setProducts] = useState(seededProducts)
   const [rules, setRules] = useState(seededDiscountRules)
   const [categoryRules, setCategoryRules] = useState({
@@ -375,13 +359,14 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
     <div className="page-stack">
       <PageHeader
         eyebrow="Sales back-end"
-        title="Configuration"
-        description="Control the data and policies that govern pricing, approvals, fulfillment and recurring billing."
-        actions={activeTab === 'discounts' ? null : <button className="button button--primary" type="button" onClick={() => toast.success('Configuration saved')}><Save size={15} /> Save changes</button>}
+        title={user.role === 'MANAGER' ? 'Pricing policy' : 'Configuration'}
+        description={user.role === 'MANAGER'
+          ? 'Set customer-tier and category discount ceilings used by automatic approval routing.'
+          : 'Control products, pricing, fulfillment, recurring billing and internal access.'}
       />
 
       <section className="configuration-tabs">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {visibleTabs.map(({ id, label, icon: Icon }) => (
           <button
             className={activeTab === id ? 'active' : ''}
             type="button"
@@ -405,12 +390,11 @@ export default function ConfigurationPage({ initialTab = 'products' }) {
           onCreateCategory={createCategoryDiscount}
           savingTier={savingTier}
           savingCategory={savingCategory}
-          canManage={user.role === 'ADMIN'}
+          canManage={['ADMIN', 'MANAGER'].includes(user.role)}
         />
       )}
       {activeTab === 'warehouses' && <WarehouseConfiguration warehouses={warehouses} />}
       {activeTab === 'plans' && <PlanConfiguration plans={plans} />}
-      {activeTab === 'recommendations' && <RecommendationConfiguration />}
       {activeTab === 'access' && (
         <AccessRequests
           requests={requests}

@@ -1,6 +1,5 @@
 import {
   AlertOctagon,
-  ArrowLeft,
   Check,
   CheckCircle2,
   Clock3,
@@ -10,18 +9,20 @@ import {
   X,
 } from 'lucide-react'
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { USER_ROLES } from '../../contracts/auth.js'
 import { calculateQuote, formatMoney } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, RiskGauge, StatusBadge } from '../components/Ui.jsx'
 
 export default function ApprovalsPage() {
   const { quoteId } = useParams()
-  const navigate = useNavigate()
-  const { quotes, reviewQuote } = useWorkspace()
+  const { quotes, reviewQuote, user } = useWorkspace()
+  const reviewerRole = user.role === USER_ROLES.MANAGER ? 'Sales manager' : 'Finance'
   const approvalQuotes = quotes.filter((quote) =>
-    ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REVISION'].includes(quote.stage),
+    ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REVISION'].includes(quote.stage) &&
+    quote.approvalSteps.some((step) => step.role === reviewerRole),
   )
   const [selectedId, setSelectedId] = useState(quoteId || approvalQuotes[0]?.id)
   const [reason, setReason] = useState('')
@@ -52,7 +53,8 @@ export default function ApprovalsPage() {
   }
 
   const calculation = calculateQuote(quote)
-  const canAct = quote.stage === 'PENDING_APPROVAL'
+  const activeStep = quote.approvalSteps.find((step) => step.status === 'PENDING')
+  const canAct = quote.stage === 'PENDING_APPROVAL' && activeStep?.role === reviewerRole
 
   return (
     <div className="page-stack">
@@ -60,11 +62,10 @@ export default function ApprovalsPage() {
         eyebrow="Pricing governance"
         title="Discount approvals"
         description="Review the blended commercial risk, approval path and complete audit history."
-        actions={<button className="button button--quiet" type="button" onClick={() => navigate(`/quotations/${quote.id}`)}><ArrowLeft size={15} /> Open quotation</button>}
       />
 
       <div className="approval-layout">
-        <Panel title="Review queue" description={`${approvalQuotes.filter((item) => item.stage === 'PENDING_APPROVAL').length} decisions are waiting.`} className="approval-queue-panel">
+        <Panel title="Review queue" description={`${approvalQuotes.filter((item) => item.approvalSteps.some((step) => step.role === reviewerRole && step.status === 'PENDING')).length} decisions are waiting for ${reviewerRole}.`} className="approval-queue-panel">
           <div className="approval-queue">
             {approvalQuotes.map((item) => {
               const itemCalculation = calculateQuote(item)
@@ -136,7 +137,14 @@ export default function ApprovalsPage() {
                 <button className="button button--danger" type="button" onClick={() => decide('REJECT')} disabled={!canAct}><X size={15} /> Reject</button>
                 <button className="button button--success" type="button" onClick={() => decide('APPROVE')} disabled={!canAct}><CheckCircle2 size={15} /> Approve</button>
               </div>
-              {!canAct && <p className="decision-complete"><CheckCircle2 size={14} /> This quotation has no open reviewer action.</p>}
+              {!canAct && (
+                <p className="decision-complete">
+                  <Clock3 size={14} />
+                  {activeStep
+                    ? `Waiting for ${activeStep.role} review.`
+                    : 'This quotation has no open reviewer action.'}
+                </p>
+              )}
             </Panel>
           </div>
 
@@ -155,4 +163,3 @@ export default function ApprovalsPage() {
     </div>
   )
 }
-

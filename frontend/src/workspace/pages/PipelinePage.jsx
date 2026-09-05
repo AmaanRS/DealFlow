@@ -52,7 +52,7 @@ export default function PipelinePage() {
                     </button>
                   )
                 })}
-                {!items.length && <div className="pipeline-empty">Drop the next deal here</div>}
+                {!items.length && <div className="pipeline-empty">No deals in this stage</div>}
               </div>
             </div>
           )
@@ -61,4 +61,3 @@ export default function PipelinePage() {
     </div>
   )
 }
-

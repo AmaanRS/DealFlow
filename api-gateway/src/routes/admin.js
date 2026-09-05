@@ -14,7 +14,7 @@ import {
 
 const router = Router()
 
-router.use(asyncRoute(requireInternalAuth), requireRoles(USER_ROLES.ADMIN))
+router.use(asyncRoute(requireInternalAuth))
 
 const createTierDiscountSchema = z.object({
   tier: z.string().trim().min(1).max(100),
@@ -66,6 +66,7 @@ function logRegistrationReviewFailure(req, requestId, errorCode, outcome) {
 
 router.post(
   '/create_tier_discount',
+  requireRoles(USER_ROLES.ADMIN, USER_ROLES.MANAGER),
   asyncRoute(async (req, res) => {
     const body = parseBody(createTierDiscountSchema, req, res)
     if (!body) return
@@ -129,6 +130,7 @@ router.post(
 
 router.post(
   ['/create_category_discount', '/create_category_discount_'],
+  requireRoles(USER_ROLES.ADMIN, USER_ROLES.MANAGER),
   asyncRoute(async (req, res) => {
     const body = parseBody(createCategoryDiscountSchema, req, res)
     if (!body) return
@@ -171,6 +173,7 @@ router.post(
 
 router.get(
   '/users',
+  requireRoles(USER_ROLES.ADMIN),
   asyncRoute(async (_req, res) => {
     const users = await User.find({
       is_deleted: { $ne: true },
@@ -188,6 +191,7 @@ router.get(
 
 router.get(
   '/registration-requests',
+  requireRoles(USER_ROLES.ADMIN),
   asyncRoute(async (req, res) => {
     const status = req.query.status || USER_STATUSES.PENDING_APPROVAL
     if (!Object.values(USER_STATUSES).includes(status)) {
@@ -349,6 +353,7 @@ function sendRegistrationReviewResult(req, res, requestId, decision, result) {
 
 router.post(
   '/approve_user',
+  requireRoles(USER_ROLES.ADMIN),
   asyncRoute(async (req, res) => {
     const body = parseBody(approveUserSchema, req, res)
     if (!body) return
@@ -365,6 +370,7 @@ router.post(
 
 router.patch(
   '/registration-requests/:requestId',
+  requireRoles(USER_ROLES.ADMIN),
   asyncRoute(async (req, res) => {
     const body = parseBody(reviewSchema, req, res)
     if (!body) return
