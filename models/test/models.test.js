@@ -142,6 +142,7 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
   const statusPath = Quote.schema.path('status')
   const riskPath = Quote.schema.path('risk')
   const subscriptionsPath = Quote.schema.path('subscription_details')
+  const subscriptionLatestPath = SubscriptionDetails.schema.path('is_latest')
   const productSchema = Quote.schema.path('products').schema
   const fulfillmentSchema = Quote.schema.path('fulfillment_details').schema
   const quoteRevision = new QuoteRevisionHistory({
@@ -165,6 +166,8 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
     subscriptionsPath.embeddedSchemaType.options.ref,
     'SubscriptionDetails',
   )
+  assert.equal(subscriptionLatestPath.instance, 'Boolean')
+  assert.equal(subscriptionLatestPath.options.default, true)
   assert.equal(productSchema.path('item_id').options.ref, 'Item')
   assert.equal(productSchema.path('article_id').options.ref, 'Article')
   assert.equal(productSchema.path('store_id').instance, 'ObjectId')

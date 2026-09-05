@@ -247,6 +247,12 @@ const subscriptionDetailsSchema = new Schema(
       required: true,
       index: true,
     },
+    is_latest: {
+      type: Boolean,
+      default: true,
+      required: true,
+      index: true,
+    },
     subscription_price: {
       ...nonNegativeNumber(),
       required: true,
@@ -260,6 +266,8 @@ const subscriptionDetailsSchema = new Schema(
   },
   { collection: 'subscription_details', timestamps: true, versionKey: false },
 )
+
+subscriptionDetailsSchema.index({ item_id: 1, is_latest: 1, updatedAt: -1 })
 
 subscriptionDetailsSchema.pre('validate', async function deriveSubscriptionPricing() {
   if (!this.article_id || (!this.isNew && !this.isModified('article_id'))) return

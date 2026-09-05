@@ -4,6 +4,8 @@ import { logger } from "@app/observability";
 import { config } from "./convict.js";
 import { initializeQuoteCollections } from "./models.js";
 import quoteRoutes from "./routes/quote.js";
+import subscriptionRoutes from "./routes/subscription.js";
+import subscriptionDetailsRoutes from "./routes/subscriptionDetails.js";
 
 const app = express();
 const port = config.get("port");
@@ -11,6 +13,8 @@ let databaseReady = false;
 
 app.use(express.json({ limit: "64kb" }));
 app.use("/quote", quoteRoutes);
+app.use("/subscription", subscriptionRoutes);
+app.use("/subscription_details", subscriptionDetailsRoutes);
 
 app.get("/health", (_req, res) => {
   res.status(databaseReady ? 200 : 503).json({
