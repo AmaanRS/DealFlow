@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
-import { logger } from "@app/observability";
+import { createLogger } from "@app/observability";
 import {
   SUBSCRIPTION_STATUSES,
   SubscriptionDetails,
   SubscriptionRevisionHistory,
 } from "../models.js";
+
+const logger = createLogger("morning-star.subscription-controller", {
+  "service.component": "subscription-controller",
+});
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -94,7 +98,7 @@ function parseBoolean(value, field) {
   throw new ApiError(400, "INVALID_FILTER", `${field} must be true or false`);
 }
 
-async function changeSubscriptionStatus(subscriptionId, status) {
+async function changeSubscriptionStatus(subscriptionId, status, requestId) {
   requireSubscriptionId(subscriptionId);
 
   const current = await SubscriptionDetails.findById(subscriptionId).lean();
@@ -115,6 +119,15 @@ async function changeSubscriptionStatus(subscriptionId, status) {
   }
 
   if (current.status === status) {
+    logger.info("Subscription status change skipped because it is unchanged", {
+      "event.name": "subscription.status.change.skipped",
+      "event.outcome": "success",
+      "request.id": requestId,
+      "subscription.id": String(current._id),
+      "subscription.status": current.status,
+      "subscription.change.reason": "already_in_requested_status",
+    });
+
     return {
       subscription: await subscriptionQuery(subscriptionId),
       revision: null,
@@ -163,10 +176,15 @@ async function changeSubscriptionStatus(subscriptionId, status) {
 
     const subscription = await subscriptionQuery(updated._id);
     logger.info("Subscription status changed", {
-      subscription_id: String(updated._id),
-      previous_status: current.status,
-      status,
-      sub_version: revision.sub_version,
+      "event.name": "subscription.status.changed",
+      "event.outcome": "success",
+      "request.id": requestId,
+      "subscription.id": String(updated._id),
+      "subscription.previous_status": current.status,
+      "subscription.status": status,
+      "subscription.version": revision.sub_version,
+      "article.id": String(current.article_id),
+      "item.id": String(current.item_id),
     });
 
     return { subscription, revision: revision.toObject() };
@@ -274,6 +292,7 @@ export async function cancelSubscription(req, res) {
   const result = await changeSubscriptionStatus(
     req.params.subscription_id,
     "CANCELLED",
+    req.requestId,
   );
   res.json(result);
 }
@@ -392,11 +411,19 @@ export async function updateSubscription(req, res) {
     const populatedSubscription = await subscriptionQuery(newSubscription._id);
 
     logger.info("Subscription article upgraded", {
-      previous_subscription_id: String(current._id),
-      subscription_id: String(newSubscription._id),
-      previous_article_id: String(current.article_id),
-      article_id: String(newSubscription.article_id),
-      sub_version: newRevision.sub_version,
+      "event.name": "subscription.article.upgraded",
+      "event.outcome": "success",
+      "request.id": req.requestId,
+      "subscription.previous.id": String(current._id),
+      "subscription.id": String(newSubscription._id),
+      "subscription.version": newRevision.sub_version,
+      "subscription.status": newSubscription.status,
+      "article.previous.id": String(current.article_id),
+      "article.id": String(newSubscription.article_id),
+      "item.previous.id": String(current.item_id),
+      "item.id": String(newSubscription.item_id),
+      "subscription.price": newSubscription.subscription_price,
+      "subscription.selling_price": newSubscription.selling_price,
     });
 
     res.json({

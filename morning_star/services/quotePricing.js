@@ -466,7 +466,7 @@ export async function priceQuotation(input, { inventoryCredits = new Map() } = {
   const roundedDiscountedPrice = roundMoney(discountedPrice);
   const roundedSellingPrice = roundMoney(sellingPrice);
   const thresholds = effectiveRiskThresholds(riskConfiguration);
-  const { risk } = calculateQuoteRisk({
+  const riskEvaluation = calculateQuoteRisk({
     products,
     costPrice: roundedCostPrice,
     discountedPrice: roundedDiscountedPrice,
@@ -482,7 +482,13 @@ export async function priceQuotation(input, { inventoryCredits = new Map() } = {
     cost_price: roundedCostPrice,
     discounted_price: roundedDiscountedPrice,
     selling_price: roundedSellingPrice,
-    risk,
+    risk: riskEvaluation.risk,
+    risk_evaluation: {
+      discount_percentage: riskEvaluation.discount_percentage,
+      line_item_rule_triggered: riskEvaluation.line_item_rule_triggered,
+      medium_risk_threshold: thresholds.medium_risk_threshold,
+      high_risk_threshold: thresholds.high_risk_threshold,
+    },
     fulfillment_details: fulfillmentDetails,
   };
 }

@@ -6,6 +6,7 @@ import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { config, getOtlpSignalEndpoint } from "./convict.js";
+import { createLogger } from "./logger.js";
 
 const stateKey = Symbol.for("observability.node-sdk.state");
 
@@ -16,6 +17,9 @@ const state = globalThis[stateKey] ?? {
 };
 
 globalThis[stateKey] = state;
+const logger = createLogger("observability.sdk", {
+  "service.component": "telemetry",
+});
 
 /**
  * Start OpenTelemetry once for the current Node.js process.
@@ -25,6 +29,10 @@ globalThis[stateKey] = state;
  */
 export function startObservability() {
   if (state.started) {
+    logger.debug("OpenTelemetry SDK start skipped because it is already running", {
+      "event.name": "telemetry.sdk.start.skipped",
+      "event.outcome": "success",
+    });
     return state.sdk;
   }
 
@@ -57,6 +65,16 @@ export function startObservability() {
   state.sdk = sdk;
   state.started = true;
 
+  logger.info("OpenTelemetry SDK started", {
+    "event.name": "telemetry.sdk.started",
+    "event.outcome": "success",
+    "service.name": config.get("service.name"),
+    "telemetry.exporter.protocol": "otlp_http",
+    "telemetry.metric.export_interval_ms": config.get(
+      "metrics.exportIntervalMillis",
+    ),
+  });
+
   return sdk;
 }
 
@@ -70,6 +88,11 @@ export function shutdownObservability() {
   }
 
   if (!state.shutdownPromise) {
+    logger.info("OpenTelemetry SDK shutdown started", {
+      "event.name": "telemetry.sdk.shutdown.started",
+      "event.outcome": "success",
+      "service.name": config.get("service.name"),
+    });
     state.shutdownPromise = state.sdk.shutdown().finally(() => {
       state.sdk = undefined;
       state.started = false;

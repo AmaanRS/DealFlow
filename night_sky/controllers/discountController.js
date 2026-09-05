@@ -1,6 +1,10 @@
 import mongoose from "mongoose";
-import { logger } from "@app/observability";
+import { createLogger } from "@app/observability";
 import { CategoryDiscount, TierDiscount } from "../models.js";
+
+const logger = createLogger("night-sky.discount-controller", {
+  "service.component": "discount-controller",
+});
 
 function requireDatabase(res) {
   if (mongoose.connection.readyState === 1) return true;
@@ -83,9 +87,12 @@ export async function updateTierDiscount(req, res) {
   );
 
   logger.info("Tier discount configured", {
-    tier_discount_id: String(tierDiscount._id),
-    tier: tierDiscount.tier,
-    discount: tierDiscount.discount,
+    "event.name": "discount.tier.configured",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "tier_discount.id": String(tierDiscount._id),
+    "customer.tier": tierDiscount.tier,
+    "discount.percent": tierDiscount.discount,
   });
   res.json({ tier_discount: tierDiscount });
 }
@@ -144,10 +151,14 @@ export async function updateCategoryDiscount(req, res) {
     : await CategoryDiscount.create({ ...updates, subscription: 0 });
 
   logger.info("Category discount configured", {
-    category_discount_id: String(categoryDiscount._id),
-    hardware: categoryDiscount.hardware,
-    service: categoryDiscount.service,
-    subscription: categoryDiscount.subscription,
+    "event.name": "discount.category.configured",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "category_discount.id": String(categoryDiscount._id),
+    "discount.hardware.percent": categoryDiscount.hardware,
+    "discount.service.percent": categoryDiscount.service,
+    "discount.subscription.percent": categoryDiscount.subscription,
+    "discount.updated_fields": Object.keys(updates),
   });
   res.json({ category_discount: categoryDiscount });
 }

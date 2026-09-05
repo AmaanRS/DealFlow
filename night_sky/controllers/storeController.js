@@ -1,7 +1,11 @@
 import mongoose from "mongoose";
 import { getDistance } from "geolib";
-import { logger } from "@app/observability";
+import { createLogger } from "@app/observability";
 import { Article, Quote, Store, User } from "../models.js";
+
+const logger = createLogger("night-sky.store-controller", {
+  "service.component": "store-controller",
+});
 
 function parseItemIds(value) {
   const values = Array.isArray(value) ? value : [value];
@@ -111,7 +115,15 @@ export async function createStore(req, res) {
     long,
   });
 
-  logger.info("Store created", { store_id: String(store._id) });
+  logger.info("Store created", {
+    "event.name": "catalog.store.created",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "store.id": String(store._id),
+    "store.name": store.name,
+    "store.location.latitude": store.lat,
+    "store.location.longitude": store.long,
+  });
   res.status(201).json({ store });
 }
 
@@ -245,6 +257,19 @@ export async function splitQuoteByStore(req, res) {
 
     if (!selected) {
       const articleId = String(product.article_id);
+      logger.warn("No store has enough inventory for quotation product", {
+        "event.name": "quote.store_allocation.rejected",
+        "event.outcome": "failure",
+        "request.id": req.requestId,
+        "application.error.code": "NO_ELIGIBLE_STORE",
+        "quote.id": String(quote._id),
+        "customer.id": String(quote.customer),
+        "product.index": productIndex,
+        "item.id": String(product.item_id),
+        "article.id": articleId,
+        "inventory.requested": product.inv,
+        "store.candidate.count": candidates.length,
+      });
       res.status(409).json({
         code: "NO_ELIGIBLE_STORE",
         message: `No store has enough sellable inventory for article ${articleId}`,
@@ -310,8 +335,20 @@ export async function splitQuoteByStore(req, res) {
   }
 
   logger.info("Quotation stores allocated", {
-    quote_id: String(quote._id),
-    assignment_count: assignments.length,
+    "event.name": "quote.store_allocation.completed",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "quote.id": String(quote._id),
+    "customer.id": String(quote.customer),
+    "product.physical.count": physicalProducts.length,
+    "store.assignment.count": assignments.length,
+    "store.ids": [
+      ...new Set(assignments.map((entry) => String(entry.store_id))),
+    ],
+    "store.maximum_distance_meters": Math.max(
+      0,
+      ...assignments.map((entry) => entry.distance_meters),
+    ),
   });
 
   res.json({

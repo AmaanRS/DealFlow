@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { logger } from "@app/observability";
+import { createLogger } from "@app/observability";
 import { Article } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
@@ -16,6 +16,10 @@ import {
   priceQuotation,
   quoteIntentFromSnapshot,
 } from "../services/quotePricing.js";
+
+const logger = createLogger("morning-star.quote-controller", {
+  "service.component": "quote-controller",
+});
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -610,8 +614,13 @@ export async function createQuotation(req, res) {
   let quote;
   let revision;
   let workflowResult;
+  let riskEvaluation;
   try {
-    const pricedQuotation = await priceQuotation(body);
+    const {
+      risk_evaluation: calculatedRiskEvaluation,
+      ...pricedQuotation
+    } = await priceQuotation(body);
+    riskEvaluation = calculatedRiskEvaluation;
     quote = await Quote.create({
       ...applyCreationRiskWorkflow(pricedQuotation),
       subscription_details: [],
@@ -625,11 +634,33 @@ export async function createQuotation(req, res) {
     const createdQuote = await quoteQuery(workflowResult.quote._id);
 
     logger.info("Quotation created", {
-      quote_id: String(quote._id),
-      negotiation_id: revision.negotiation_id,
-      risk: createdQuote.risk,
-      status: createdQuote.status,
-      invoice_id: workflowResult.billing?.invoice_id ?? null,
+      "event.name": "quote.created",
+      "event.outcome": "success",
+      "request.id": req.requestId,
+      "quote.id": String(quote._id),
+      "quote.negotiation.id": revision.negotiation_id,
+      "quote.version": revision.quote_version,
+      "quote.customer.id": String(quote.customer),
+      "quote.risk": createdQuote.risk,
+      "quote.risk.discount_percentage": riskEvaluation.discount_percentage,
+      "quote.risk.line_item_rule_triggered":
+        riskEvaluation.line_item_rule_triggered,
+      "quote.risk.medium_threshold": riskEvaluation.medium_risk_threshold,
+      "quote.risk.high_threshold": riskEvaluation.high_risk_threshold,
+      "quote.status": createdQuote.status,
+      "quote.product.count": createdQuote.products.length,
+      "quote.subscription.count":
+        workflowResult.subscriptions?.length ?? 0,
+      "quote.inventory.reservation.count":
+        workflowResult.reservations?.length ?? 0,
+      "quote.price.cost": createdQuote.cost_price,
+      "quote.price.discounted": createdQuote.discounted_price,
+      "quote.price.selling": createdQuote.selling_price,
+      "billing.id": workflowResult.billing
+        ? String(workflowResult.billing._id)
+        : null,
+      "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
+      "billing.final_amount": workflowResult.billing?.final_amt ?? null,
     });
 
     res.status(201).json({
@@ -776,9 +807,11 @@ export async function updateQuotation(req, res) {
     currentQuote.status === "NEGOTIATION"
       ? inventoryByArticle(currentQuote.products)
       : new Map();
-  const nextValues = normalizeQuoteInput(
-    await priceQuotation(nextIntent, { inventoryCredits }),
-  );
+  const {
+    risk_evaluation: riskEvaluation,
+    ...pricedNextValues
+  } = await priceQuotation(nextIntent, { inventoryCredits });
+  const nextValues = normalizeQuoteInput(pricedNextValues);
 
   const acquired = await Quote.updateOne(
     { _id: currentQuote._id, is_latest_quote: true },
@@ -828,11 +861,31 @@ export async function updateQuotation(req, res) {
     const updatedQuote = await quoteQuery(workflowResult.quote._id);
 
     logger.info("Quotation revision created", {
-      previous_quote_id: String(currentQuote._id),
-      quote_id: String(newQuote._id),
-      negotiation_id: newRevision.negotiation_id,
-      quote_version: newRevision.quote_version,
-      released_inventory_count: releasedInventory.length,
+      "event.name": "quote.revision.created",
+      "event.outcome": "success",
+      "request.id": req.requestId,
+      "quote.previous.id": String(currentQuote._id),
+      "quote.id": String(newQuote._id),
+      "quote.negotiation.id": newRevision.negotiation_id,
+      "quote.version": newRevision.quote_version,
+      "quote.previous.status": currentQuote.status,
+      "quote.status": updatedQuote.status,
+      "quote.risk": updatedQuote.risk,
+      "quote.risk.discount_percentage": riskEvaluation.discount_percentage,
+      "quote.risk.line_item_rule_triggered":
+        riskEvaluation.line_item_rule_triggered,
+      "quote.risk.medium_threshold": riskEvaluation.medium_risk_threshold,
+      "quote.risk.high_threshold": riskEvaluation.high_risk_threshold,
+      "quote.updated_fields": Object.keys(updates),
+      "quote.product.count": updatedQuote.products.length,
+      "quote.inventory.reservation.count":
+        workflowResult.reservations?.length ?? 0,
+      "quote.inventory.release.count": releasedInventory.length,
+      "quote.price.cost": updatedQuote.cost_price,
+      "quote.price.discounted": updatedQuote.discounted_price,
+      "quote.price.selling": updatedQuote.selling_price,
+      "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
+      "billing.final_amount": workflowResult.billing?.final_amt ?? null,
     });
 
     res.json({

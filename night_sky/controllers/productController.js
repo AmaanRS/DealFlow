@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { logger } from "@app/observability";
+import { createLogger } from "@app/observability";
 import {
   appendReportingHsn,
   Article,
@@ -10,6 +10,10 @@ import {
   Quote,
   Store,
 } from "../models.js";
+
+const logger = createLogger("night-sky.product-controller", {
+  "service.component": "product-controller",
+});
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -301,6 +305,16 @@ export async function createHsn(req, res) {
 
   const reportingHsn = await appendReportingHsn(hsn_code, gst);
 
+  logger.info("Reporting HSN entry created", {
+    "event.name": "catalog.reporting_hsn.created",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "hsn.code": hsn_code.trim(),
+    "reporting_hsn.id": String(reportingHsn._id),
+    "reporting_hsn.code": reportingHsn.reporting_hsn,
+    "tax.gst.percent": reportingHsn.gst,
+  });
+
   res.status(201).json({ reporting_hsn: reportingHsn });
 }
 
@@ -402,8 +416,15 @@ export async function createProduct(req, res) {
     const product = await productQuery(item._id);
 
     logger.info("Product created", {
-      item_id: String(item._id),
-      article_count: createdArticles.length,
+      "event.name": "catalog.product.created",
+      "event.outcome": "success",
+      "request.id": req.requestId,
+      "item.id": String(item._id),
+      "item.name": item.name,
+      "item.categories": item.categories,
+      "item.reporting_hsn": item.reporting_hsn,
+      "article.count": createdArticles.length,
+      "article.ids": createdArticles.map((article) => String(article._id)),
     });
 
     res.status(201).json({ product });
@@ -581,14 +602,16 @@ export async function addInventory(req, res) {
   }
 
   logger.info("Article inventory added", {
-    article_id: String(article._id),
-    store_id: String(article.store_id?._id ?? article.store_id),
-    ...Object.fromEntries(
-      Object.entries(increments).map(([field, value]) => [
-        field.replace("inventory.", "added_"),
-        value,
-      ]),
-    ),
+    "event.name": "catalog.inventory.added",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "item.id": String(existingArticle.item_id),
+    "article.id": String(article._id),
+    "store.id": String(article.store_id?._id ?? article.store_id),
+    "inventory.added.sellable": increments["inventory.sellable"] ?? 0,
+    "inventory.added.reserved": increments["inventory.reserved"] ?? 0,
+    "inventory.current.sellable": article.inventory.sellable,
+    "inventory.current.reserved": article.inventory.reserved,
   });
 
   res.json({ article });
