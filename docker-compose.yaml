@@ -1,0 +1,21 @@
+services:
+  otel-collector:
+    build:
+      context: ./otel_collector
+      dockerfile: Dockerfile
+    networks:
+      - observability
+
+  emails:
+    build:
+      context: .
+      dockerfile: emails/Dockerfile
+    depends_on:
+      - otel-collector
+    env_file:
+      - ./emails/.env
+    networks:
+      - observability
+
+networks:
+  observability:

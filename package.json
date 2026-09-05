@@ -1,0 +1,8 @@
+{
+  "name": "dockerize-app-test",
+  "private": true,
+  "workspaces": [
+    "emails",
+    "observability"
+  ]
+}
