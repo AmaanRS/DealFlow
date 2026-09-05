@@ -1,6 +1,6 @@
 import { ArrowUpRight, CircleDollarSign, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { calculateQuote, formatMoney } from '../dealMath.js'
+import { calculateQuote, formatMoney, formatPercentage } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, StatusBadge } from '../components/Ui.jsx'
 
@@ -48,7 +48,7 @@ export default function PipelinePage() {
                       <strong>{quote.customer.name}</strong>
                       <p>{quote.customer.tier} price list · {quote.rep}</p>
                       <div><strong>{formatMoney(calculation.total)}</strong><StatusBadge status={quote.stage} /></div>
-                      <footer><span>{calculation.marginPercent.toFixed(1)}% margin</span><span>Risk {calculation.riskScore}</span></footer>
+                      <footer><span>{formatPercentage(calculation.marginPercent)} margin</span><span>Risk {calculation.riskScore}</span></footer>
                     </button>
                   )
                 })}

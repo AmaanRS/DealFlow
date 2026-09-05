@@ -293,9 +293,9 @@ export const stageMeta = {
   CONFIRMED: { label: 'Confirmed', tone: 'success' },
   REJECTED: { label: 'Rejected', tone: 'danger' },
   REVISION: { label: 'Revision requested', tone: 'warning' },
+  COMPLETED: { label: 'Completed', tone: 'success' },
 }
 
 export function cloneSeedQuotes() {
   return JSON.parse(JSON.stringify(initialQuotes))
 }
-

@@ -267,7 +267,13 @@ export async function priceQuotation(input) {
 
   const [customer, articles, categoryDiscount, riskConfiguration] =
     await Promise.all([
-      User.findOne({ _id: input.customer, is_deleted: { $ne: true } })
+      User.findOne({
+        _id: input.customer,
+        role: "CUSTOMER",
+        status: "ACTIVE",
+        is_verified: true,
+        is_deleted: false,
+      })
         .select("role requestedRole _custom_json.tier")
         .lean(),
       Article.find({

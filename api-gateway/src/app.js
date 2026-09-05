@@ -6,7 +6,11 @@ import helmet from 'helmet'
 import { config } from './config.js'
 import adminRoutes from './routes/admin.js'
 import authRoutes from './routes/auth.js'
+import customerRoutes from './routes/customer.js'
 import portalRoutes from './routes/portal.js'
+import productRoutes from './routes/product.js'
+import quoteRoutes from './routes/quote.js'
+import storeRoutes from './routes/store.js'
 import {
   errorLogAttributes,
   logger,
@@ -99,6 +103,10 @@ app.get(['/v1/api/health', '/api/health'], (req, res) => {
 
 app.use('/v1/api/user/auth', authRoutes)
 app.use('/v1/api/admin', adminRoutes)
+app.use('/v1/api/customer', customerRoutes)
+app.use('/v1/api/product', productRoutes)
+app.use('/v1/api/quote', quoteRoutes)
+app.use('/v1/api/store', storeRoutes)
 
 // Compatibility routes used by the existing frontend while it migrates to /v1/api.
 app.use('/api/v1/auth', authRoutes)

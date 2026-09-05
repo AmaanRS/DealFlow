@@ -1,6 +1,14 @@
 import mongoose from "mongoose";
 import { logger } from "@app/observability";
-import { appendReportingHsn, Article, Hsn, Item, Quote } from "../models.js";
+import {
+  appendReportingHsn,
+  Article,
+  Hsn,
+  ITEM_CATEGORIES,
+  Item,
+  Quote,
+  Store,
+} from "../models.js";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -121,6 +129,86 @@ export async function getQuoteInventory(req, res) {
         articleById.get(String(product.article_id)).store_id,
       inv: product.inv,
     })),
+    pagination: {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit),
+    },
+  });
+}
+
+function positiveInteger(value, fallback, name, maximum) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    (maximum !== undefined && parsed > maximum)
+  ) {
+    throw Object.assign(
+      new Error(
+        `${name} must be a positive integer${maximum ? ` up to ${maximum}` : ""}`,
+      ),
+      { status: 400, code: "INVALID_PAGINATION" },
+    );
+  }
+  return parsed;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function parseProductListQuery(query) {
+  const page = positiveInteger(query.page, DEFAULT_PAGE, "page");
+  const limit = positiveInteger(query.limit, DEFAULT_LIMIT, "limit", MAX_LIMIT);
+  const filter = {};
+
+  if (query.category) {
+    const category = String(query.category).trim().toUpperCase();
+    if (!ITEM_CATEGORIES.includes(category)) {
+      throw Object.assign(
+        new Error(`category must be one of: ${ITEM_CATEGORIES.join(", ")}`),
+        { status: 400, code: "INVALID_CATEGORY" },
+      );
+    }
+    filter.categories = category;
+  }
+
+  if (query.search) {
+    const search = String(query.search).trim();
+    if (search.length > 100) {
+      throw Object.assign(new Error("search must contain at most 100 characters"), {
+        status: 400,
+        code: "INVALID_SEARCH",
+      });
+    }
+    if (search) filter.name = { $regex: escapeRegex(search), $options: "i" };
+  }
+
+  return { filter, page, limit };
+}
+
+export async function getProducts(req, res) {
+  if (!isDatabaseReady()) {
+    sendDatabaseUnavailable(res);
+    return;
+  }
+
+  const { filter, page, limit } = parseProductListQuery(req.query);
+  const [products, total] = await Promise.all([
+    Item.find(filter)
+      .sort({ name: 1, _id: 1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate("all_identifiers")
+      .lean(),
+    Item.countDocuments(filter),
+  ]);
+
+  res.json({
+    products,
     pagination: {
       page,
       limit,
@@ -324,7 +412,7 @@ export async function addInventory(req, res) {
   }
 
   const unsupportedFields = Object.keys(req.body).filter(
-    (field) => !["article_id", "inventory"].includes(field),
+    (field) => !["article_id", "store_id", "inventory"].includes(field),
   );
   if (unsupportedFields.length > 0) {
     res.status(400).json({
@@ -334,7 +422,11 @@ export async function addInventory(req, res) {
     return;
   }
 
-  const { article_id: articleId, inventory } = req.body;
+  const {
+    article_id: articleId,
+    store_id: requestedStoreId,
+    inventory,
+  } = req.body;
   if (!mongoose.isObjectIdOrHexString(articleId)) {
     res.status(400).json({
       code: "INVALID_ARTICLE_ID",
@@ -387,13 +479,11 @@ export async function addInventory(req, res) {
     return;
   }
 
-  const article = await Article.findByIdAndUpdate(
-    articleId,
-    { $inc: increments },
-    { returnDocument: "after" },
-  ).populate("store_id");
+  const existingArticle = await Article.findById(articleId)
+    .select("item_id store_id")
+    .lean();
 
-  if (!article) {
+  if (!existingArticle) {
     res.status(404).json({
       code: "ARTICLE_NOT_FOUND",
       message: "Article not found",
@@ -401,8 +491,76 @@ export async function addInventory(req, res) {
     return;
   }
 
+  const item = await Item.findById(existingArticle.item_id)
+    .select("categories")
+    .lean();
+  if (!item) {
+    res.status(409).json({
+      code: "ITEM_NOT_FOUND",
+      message: "The article does not reference an existing item",
+    });
+    return;
+  }
+
+  if (item.categories.includes("SUBSCRIPTION")) {
+    res.status(409).json({
+      code: "SUBSCRIPTION_INVENTORY_NOT_SUPPORTED",
+      message: "Subscription products do not track store inventory",
+    });
+    return;
+  }
+
+  let storeId = existingArticle.store_id;
+  if (!storeId) {
+    if (!mongoose.isObjectIdOrHexString(requestedStoreId)) {
+      res.status(400).json({
+        code: "STORE_REQUIRED",
+        message: "store_id is required when inventory is added for the first time",
+      });
+      return;
+    }
+
+    if (!(await Store.exists({ _id: requestedStoreId }))) {
+      res.status(404).json({
+        code: "STORE_NOT_FOUND",
+        message: "Store not found",
+      });
+      return;
+    }
+    storeId = requestedStoreId;
+  } else if (
+    requestedStoreId !== undefined &&
+    String(storeId) !== String(requestedStoreId)
+  ) {
+    res.status(409).json({
+      code: "ARTICLE_STORE_MISMATCH",
+      message: "Inventory for this article belongs to a different store",
+    });
+    return;
+  }
+
+  const update = { $inc: increments };
+  const filter = { _id: articleId };
+  if (!existingArticle.store_id) {
+    filter.store_id = null;
+    update.$set = { store_id: storeId };
+  }
+
+  const article = await Article.findOneAndUpdate(filter, update, {
+    returnDocument: "after",
+  }).populate("store_id");
+
+  if (!article) {
+    res.status(409).json({
+      code: "INVENTORY_UPDATE_CONFLICT",
+      message: "The article changed while inventory was being added",
+    });
+    return;
+  }
+
   logger.info("Article inventory added", {
     article_id: String(article._id),
+    store_id: String(article.store_id?._id ?? article.store_id),
     ...Object.fromEntries(
       Object.entries(increments).map(([field, value]) => [
         field.replace("inventory.", "added_"),

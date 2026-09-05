@@ -1,18 +1,123 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { quoteApi } from '../api/quoteApi.js'
+import { USER_ROLES } from '../contracts/auth.js'
 import { calculateQuote } from './dealMath.js'
-import { cloneSeedQuotes } from './seed.js'
 
-const STORAGE_KEY = 'dealflow.workspace.state.v1'
 const WorkspaceContext = createContext(null)
 
-function loadQuotes() {
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored) return JSON.parse(stored)
-  } catch {
-    // Browser storage can be unavailable in strict privacy modes.
+function formatDate(value) {
+  if (!value) return 'Not available'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Not available'
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+}
+
+function daysSince(value) {
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return 0
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000))
+}
+
+function displayCategory(value) {
+  const knownCategory = {
+    HARDWARE: 'Hardware',
+    SERVICES: 'Services',
+    SUBSCRIPTION: 'Subscriptions',
+  }[value]
+  if (knownCategory) return knownCategory
+  const label = String(value || 'Product').toLowerCase()
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function approvalStepsFor(quote, user) {
+  if (!['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].includes(quote.status)) {
+    return []
   }
-  return cloneSeedQuotes()
+
+  const assignedToCurrentUser = quote.assigned_to === user.email
+  const role = !assignedToCurrentUser
+    ? 'Assigned reviewer'
+    : user.role === USER_ROLES.FINANCE
+      ? 'Finance'
+      : 'Sales manager'
+
+  return [{
+    id: `approval-${quote._id}`,
+    role,
+    assignee: quote.assigned_to,
+    status:
+      quote.status === 'PENDING_APPROVAL'
+        ? 'PENDING'
+        : quote.status === 'APPROVED'
+          ? 'APPROVED'
+          : 'REJECTED',
+  }]
+}
+
+function toWorkspaceQuote(quote, user) {
+  const customer = quote.customer && typeof quote.customer === 'object'
+    ? quote.customer
+    : { _id: quote.customer }
+
+  return {
+    id: String(quote._id),
+    serverManaged: true,
+    customer: {
+      id: String(customer._id ?? quote.customer),
+      name: customer.fullName ?? 'Customer record unavailable',
+      email: customer.email ?? '',
+      tier: customer._custom_json?.tier ?? 'Unassigned',
+    },
+    rep: quote.created_by,
+    stage: quote.status,
+    validUntil: 'Not configured',
+    createdAt: formatDate(quote.createdAt),
+    inactivityDays: daysSince(quote.updatedAt),
+    deliveryRisk: displayCategory(quote.risk),
+    orderDiscount: quote.order_discount ?? 0,
+    lines: (quote.products ?? []).map((product) => ({
+      id: String(product._id ?? product.article_id),
+      productId: String(product.item_id),
+      articleId: String(product.article_id),
+      quantity: product.inv,
+      discount: product.applied_discount,
+      allowedDiscount: product.product_discount,
+      product: {
+        id: String(product.item_id),
+        articleId: String(product.article_id),
+        sku: product.hsn,
+        name: product.name,
+        category: displayCategory(product.category),
+        price: product.unit_price,
+        cost: null,
+        unit: 'Unit',
+        tax: product.gst,
+        stock: null,
+        discountLimit: product.product_discount,
+        description: `HSN ${product.hsn}`,
+      },
+    })),
+    approvalSteps: approvalStepsFor(quote, user),
+    audit: [{
+      id: `audit-${quote._id}`,
+      actor: quote.approved_by ?? quote.created_by,
+      action: quote.status === 'DRAFT' ? 'Quotation created' : `Status: ${quote.status}`,
+      detail: quote.reason ?? 'Quotation data loaded from Morning Star.',
+      time: formatDate(quote.updatedAt),
+    }],
+    fulfillmentDetails: quote.fulfillment_details ?? [],
+    serverPricing: {
+      gross: quote.cost_price ?? 0,
+      discounted: quote.discounted_price ?? 0,
+      total: quote.selling_price ?? 0,
+      tierDiscount: quote.tier_discount ?? 0,
+      risk: quote.risk,
+    },
+  }
 }
 
 function createAudit(actor, action, detail) {
@@ -26,15 +131,47 @@ function createAudit(actor, action, detail) {
 }
 
 export function WorkspaceProvider({ children, user }) {
-  const [quotes, setQuotes] = useState(loadQuotes)
+  const [quotes, setQuotes] = useState([])
+  const [quotesLoading, setQuotesLoading] = useState(true)
+  const [quotesError, setQuotesError] = useState(null)
+
+  const refreshQuotes = useCallback(async () => {
+    setQuotesLoading(true)
+    setQuotesError(null)
+    try {
+      const result = await quoteApi.list()
+      setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+    } catch (error) {
+      setQuotes([])
+      setQuotesError(error)
+    } finally {
+      setQuotesLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    let active = true
+
+    quoteApi.list()
+      .then((result) => {
+        if (active) {
+          setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+        }
+      })
+      .catch((error) => {
+        if (active) setQuotesError(error)
+      })
+      .finally(() => {
+        if (active) setQuotesLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [user])
 
   function commit(nextQuotes) {
     setQuotes(nextQuotes)
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextQuotes))
-    } catch {
-      // The application still works for the active session without persistence.
-    }
   }
 
   function updateQuote(quoteId, updater) {
@@ -56,7 +193,8 @@ export function WorkspaceProvider({ children, user }) {
     const id = `Q-2026-${String(sequence).padStart(4, '0')}`
     const quote = {
       id,
-      customer: { name: 'New customer', email: '', tier: 'Bronze' },
+      serverManaged: false,
+      customer: { id: '', name: 'Select a customer', email: '', tier: '' },
       rep: user.fullName,
       stage: 'DRAFT',
       validUntil: '20 Sep 2026',
@@ -72,9 +210,11 @@ export function WorkspaceProvider({ children, user }) {
     return id
   }
 
-  function addProduct(quoteId, productId) {
+  function addProduct(quoteId, product) {
     updateQuote(quoteId, (quote) => {
-      const existing = quote.lines.find((line) => line.productId === productId)
+      const existing = quote.lines.find(
+        (line) => line.product.articleId === product.articleId,
+      )
       const lines = existing
         ? quote.lines.map((line) =>
             line.id === existing.id ? { ...line, quantity: line.quantity + 1 } : line,
@@ -83,7 +223,8 @@ export function WorkspaceProvider({ children, user }) {
             ...quote.lines,
             {
               id: `line-${crypto.randomUUID()}`,
-              productId,
+              productId: product.id,
+              product,
               quantity: 1,
               discount: 0,
             },
@@ -108,38 +249,31 @@ export function WorkspaceProvider({ children, user }) {
     }))
   }
 
-  function submitQuote(quoteId) {
+  async function submitQuote(quoteId) {
     const quote = quotes.find((item) => item.id === quoteId)
     if (!quote) return null
-    const calculation = calculateQuote(quote)
-    const requiresFinance = calculation.approvalLevel === 'MANAGER_AND_FINANCE'
-    const requiresManager = calculation.approvalLevel !== 'NONE'
-    const nextStage = requiresManager ? 'PENDING_APPROVAL' : 'APPROVED'
-    const approvalSteps = requiresManager
-      ? [
-          { id: 'step-manager', role: 'Sales manager', assignee: 'Mira Shah', status: 'PENDING' },
-          ...(requiresFinance
-            ? [{ id: 'step-finance', role: 'Finance', assignee: 'Rohan Mehta', status: 'WAITING' }]
-            : []),
-        ]
-      : []
-
-    updateQuote(quoteId, (current) => ({
-      ...current,
-      stage: nextStage,
-      approvalSteps,
-      audit: [
-        createAudit(
-          'DealFlow policy',
-          requiresManager ? 'Approval routed automatically' : 'Policy check passed',
-          requiresManager
-            ? `${requiresFinance ? 'Manager and Finance' : 'Manager'} review required at risk score ${calculation.riskScore}.`
-            : 'Discounts are within all configured limits.',
-        ),
-        ...current.audit,
-      ],
-    }))
-    return { stage: nextStage, calculation }
+    const result = await quoteApi.create({
+      customer: quote.customer.id,
+      products: quote.lines.map((line) => ({
+        article_id: line.product.articleId,
+        category: line.product.categoryCode,
+        inv: line.quantity,
+        applied_discount: line.discount,
+      })),
+      order_discount: quote.orderDiscount,
+      status: 'PENDING_APPROVAL',
+      reason: null,
+      subscription_details: [],
+    })
+    const persistedQuote = toWorkspaceQuote(result.quote, user)
+    setQuotes((current) => [
+      persistedQuote,
+      ...current.filter((item) => item.id !== quoteId && item.id !== persistedQuote.id),
+    ])
+    return {
+      quote: persistedQuote,
+      calculation: calculateQuote(persistedQuote),
+    }
   }
 
   function reviewQuote(quoteId, decision, reason = '') {
@@ -186,12 +320,15 @@ export function WorkspaceProvider({ children, user }) {
   }
 
   function resetWorkspace() {
-    commit(cloneSeedQuotes())
+    refreshQuotes()
   }
 
   const value = {
     user,
     quotes,
+    quotesLoading,
+    quotesError,
+    refreshQuotes,
     updateQuote,
     createQuote,
     addProduct,

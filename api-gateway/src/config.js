@@ -110,6 +110,16 @@ const config = convict({
     env: 'SESSION_PEPPER',
     sensitive: true,
   },
+  morning_star_url: {
+    format: 'http-url',
+    default: null,
+    env: 'MORNING_STAR_URL',
+  },
+  night_sky_url: {
+    format: 'http-url',
+    default: null,
+    env: 'NIGHT_SKY_URL',
+  },
 })
 
 config.validate({ allowed: 'strict' })

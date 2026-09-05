@@ -16,6 +16,10 @@ export function formatMoney(value, compact = false) {
   }).format(Number(value) || 0)
 }
 
+export function formatPercentage(value, digits = 1) {
+  return Number.isFinite(value) ? `${value.toFixed(digits)}%` : 'Not available'
+}
+
 export function effectiveDiscount(lineDiscount = 0, orderDiscount = 0) {
   const lineFactor = 1 - Math.min(Math.max(lineDiscount, 0), 100) / 100
   const orderFactor = 1 - Math.min(Math.max(orderDiscount, 0), 100) / 100
@@ -25,17 +29,21 @@ export function effectiveDiscount(lineDiscount = 0, orderDiscount = 0) {
 export function calculateQuote(quote) {
   const enrichedLines = quote.lines
     .map((line) => {
-      const product = productById.get(line.productId)
+      const product = line.product ?? productById.get(line.productId)
       if (!product) return null
       const gross = product.price * line.quantity
       const discount = effectiveDiscount(line.discount, quote.orderDiscount)
       const net = gross * (1 - discount / 100)
-      const cost = product.cost * line.quantity
-      const marginValue = net - cost
-      const allowedDiscount = Math.min(
-        CUSTOMER_TIER_LIMITS[quote.customer.tier] ?? 0,
-        CATEGORY_DISCOUNT_LIMITS[product.category] ?? 0,
-      )
+      const cost = Number.isFinite(product.cost)
+        ? product.cost * line.quantity
+        : null
+      const marginValue = cost === null ? null : net - cost
+      const allowedDiscount = Number.isFinite(product.discountLimit)
+        ? product.discountLimit
+        : Math.min(
+            CUSTOMER_TIER_LIMITS[quote.customer.tier] ?? 0,
+            CATEGORY_DISCOUNT_LIMITS[product.category] ?? 0,
+          )
       const excess = Math.max(0, discount - allowedDiscount)
 
       return {
@@ -46,7 +54,8 @@ export function calculateQuote(quote) {
         net,
         cost,
         marginValue,
-        marginPercent: net ? (marginValue / net) * 100 : 0,
+        marginPercent:
+          marginValue === null ? null : net ? (marginValue / net) * 100 : 0,
         allowedDiscount,
         excess,
       }
@@ -55,15 +64,19 @@ export function calculateQuote(quote) {
 
   const gross = enrichedLines.reduce((sum, line) => sum + line.gross, 0)
   const total = enrichedLines.reduce((sum, line) => sum + line.net, 0)
-  const cost = enrichedLines.reduce((sum, line) => sum + line.cost, 0)
+  const cost = enrichedLines.every((line) => line.cost !== null)
+    ? enrichedLines.reduce((sum, line) => sum + line.cost, 0)
+    : null
   const discountValue = gross - total
-  const marginValue = total - cost
-  const marginPercent = total ? (marginValue / total) * 100 : 0
+  const marginValue = cost === null ? null : total - cost
+  const marginPercent =
+    marginValue === null ? null : total ? (marginValue / total) * 100 : 0
   const weightedExcess = gross
     ? enrichedLines.reduce((sum, line) => sum + line.excess * (line.gross / gross), 0)
     : 0
   const maxExcess = Math.max(0, ...enrichedLines.map((line) => line.excess))
-  const lowMarginPenalty = marginPercent < 20 ? 18 : marginPercent < 28 ? 8 : 0
+  const lowMarginPenalty =
+    marginPercent === null ? 0 : marginPercent < 20 ? 18 : marginPercent < 28 ? 8 : 0
   const riskScore = Math.min(
     100,
     Math.round(maxExcess * 6 + weightedExcess * 4 + lowMarginPenalty),
@@ -75,7 +88,7 @@ export function calculateQuote(quote) {
         ? 'MANAGER'
         : 'NONE'
 
-  return {
+  const calculated = {
     lines: enrichedLines,
     gross,
     total,
@@ -87,6 +100,30 @@ export function calculateQuote(quote) {
     maxExcess,
     riskScore,
     approvalLevel,
+  }
+
+  if (!quote.serverPricing) return calculated
+
+  const serverRiskScore =
+    { LOW: 15, MEDIUM: 50, HIGH: 85 }[quote.serverPricing.risk] ?? 0
+  return {
+    ...calculated,
+    gross: quote.serverPricing.gross,
+    total: quote.serverPricing.total,
+    cost: null,
+    discountValue: Math.max(
+      0,
+      quote.serverPricing.gross - quote.serverPricing.discounted,
+    ),
+    marginValue: null,
+    marginPercent: null,
+    riskScore: serverRiskScore,
+    approvalLevel:
+      quote.serverPricing.risk === 'HIGH'
+        ? 'MANAGER_AND_FINANCE'
+        : quote.serverPricing.risk === 'MEDIUM'
+          ? 'MANAGER'
+          : 'NONE',
   }
 }
 
@@ -159,4 +196,3 @@ export function getRecurringSchedule(quote) {
     }
   })
 }
-

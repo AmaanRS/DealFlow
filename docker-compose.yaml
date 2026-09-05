@@ -25,6 +25,10 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      morning_star:
+        condition: service_healthy
+      night_sky:
+        condition: service_healthy
     env_file:
       - ./api-gateway/.env
     expose:
@@ -120,6 +124,19 @@ services:
         condition: service_started
     env_file:
       - ./night_sky/.env
+    expose:
+      - "3001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 4s
+      retries: 20
     networks:
       - observability
       - dealflow

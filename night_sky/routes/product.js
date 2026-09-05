@@ -5,6 +5,7 @@ import {
   createProduct,
   getProduct,
   getQuoteInventory,
+  getProducts,
 } from "../controllers/productController.js";
 
 const router = Router();
@@ -16,6 +17,7 @@ function asyncRoute(handler) {
 }
 
 router.get("/get_inv/:quote_id", asyncRoute(getQuoteInventory));
+router.get("/get_products", asyncRoute(getProducts));
 router.get("/:item_id", asyncRoute(getProduct));
 router.post("/create_hsn", asyncRoute(createHsn));
 router.post("/create_product", asyncRoute(createProduct));

@@ -12,7 +12,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { USER_ROLES } from '../../contracts/auth.js'
-import { calculateQuote, formatMoney } from '../dealMath.js'
+import { calculateQuote, formatMoney, formatPercentage } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, RiskGauge, StatusBadge } from '../components/Ui.jsx'
 
@@ -84,7 +84,7 @@ export default function ApprovalsPage() {
             <div>
               <span className="page-eyebrow">{quote.id}</span>
               <h2>{quote.customer.name}</h2>
-              <p>{quote.customer.tier} customer · {formatMoney(calculation.total)} net value · {calculation.marginPercent.toFixed(1)}% margin</p>
+              <p>{quote.customer.tier} customer · {formatMoney(calculation.total)} net value · {formatPercentage(calculation.marginPercent)} margin</p>
               <StatusBadge status={quote.stage} />
             </div>
             <RiskGauge score={calculation.riskScore} />
@@ -108,7 +108,7 @@ export default function ApprovalsPage() {
                       <td>{line.discount.toFixed(1)}%</td>
                       <td>{line.allowedDiscount}%</td>
                       <td><span className={line.excess > 0 ? 'variance-pill variance-pill--danger' : 'variance-pill'}>{line.excess > 0 ? `+${line.excess.toFixed(1)} pts` : 'Within limit'}</span></td>
-                      <td>{line.marginPercent.toFixed(1)}%</td>
+                      <td>{formatPercentage(line.marginPercent)}</td>
                     </tr>
                   ))}
                 </tbody>

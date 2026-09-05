@@ -206,10 +206,15 @@ articleSchema.pre('validate', async function enforceSubscriptionArticle() {
   }
 
   if (!this.store_id) {
-    this.invalidate(
-      'store_id',
-      'store_id is required for a non-subscription item',
-    )
+    const hasInventory =
+      (this.inventory?.sellable ?? 0) > 0 ||
+      (this.inventory?.reserved ?? 0) > 0
+    if (hasInventory) {
+      this.invalidate(
+        'store_id',
+        'store_id is required before inventory can be added',
+      )
+    }
     return
   }
 

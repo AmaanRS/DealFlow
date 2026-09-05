@@ -10,15 +10,14 @@ import {
   Plus,
   Search,
   Send,
-  Sparkles,
   Trash2,
-  X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { calculateQuote, formatMoney } from '../dealMath.js'
-import { products, upsellSuggestions } from '../seed.js'
+import { customerApi } from '../../api/customerApi.js'
+import { productApi } from '../../api/productApi.js'
+import { calculateQuote, formatMoney, formatPercentage } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { Panel, RiskGauge, StatusBadge } from '../components/Ui.jsx'
 
@@ -50,16 +49,44 @@ export default function QuotationBuilderPage() {
     updateLine,
     removeLine,
     submitQuote,
+    refreshQuotes,
   } = useWorkspace()
   const quote = quotes.find((item) => item.id === quoteId)
+  const needsCatalogue = Boolean(quote && !quote.serverManaged)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
-  const [dismissed, setDismissed] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [catalogueProducts, setCatalogueProducts] = useState([])
+  const [catalogueLoading, setCatalogueLoading] = useState(true)
+  const [catalogueError, setCatalogueError] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!needsCatalogue) return undefined
+    let active = true
+
+    Promise.all([customerApi.list(), productApi.list()])
+      .then(([customerResult, productResult]) => {
+        if (!active) return
+        setCustomers(customerResult.customers ?? [])
+        setCatalogueProducts(productResult.products ?? [])
+      })
+      .catch((error) => {
+        if (active) setCatalogueError(error)
+      })
+      .finally(() => {
+        if (active) setCatalogueLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [needsCatalogue])
 
   const calculation = useMemo(() => (quote ? calculateQuote(quote) : null), [quote])
   const filteredProducts = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return products.filter((product) => {
+    return catalogueProducts.filter((product) => {
       const matchesCategory = category === 'All' || product.category === category
       const matchesQuery =
         !needle ||
@@ -67,7 +94,7 @@ export default function QuotationBuilderPage() {
         product.sku.toLowerCase().includes(needle)
       return matchesCategory && matchesQuery
     })
-  }, [category, query])
+  }, [catalogueProducts, category, query])
 
   if (!quote || !calculation) {
     return (
@@ -79,27 +106,40 @@ export default function QuotationBuilderPage() {
     )
   }
 
-  function changeCustomer(field, value) {
-    updateQuote(quote.id, (current) => ({
-      ...current,
-      customer: { ...current.customer, [field]: value },
-    }))
+  function changeCustomer(customerId) {
+    const customer = customers.find((item) => item.id === customerId)
+    if (!customer) return
+    updateQuote(quote.id, {
+      customer: {
+        id: customer.id,
+        name: customer.fullName,
+        email: customer.email,
+        tier: customer.tier,
+      },
+    })
   }
 
-  function submitForNextStep() {
+  async function submitForNextStep() {
+    if (!quote.customer.id) {
+      toast.error('Select a customer before continuing')
+      return
+    }
     if (!quote.lines.length) {
       toast.error('Add at least one product before continuing')
       return
     }
-    const result = submitQuote(quote.id)
-    if (result.stage === 'PENDING_APPROVAL') {
-      toast.warning('Quotation routed automatically', {
-        description: `${result.calculation.approvalLevel === 'MANAGER_AND_FINANCE' ? 'Manager and Finance' : 'Manager'} approval is required.`,
+
+    setSubmitting(true)
+    try {
+      const result = await submitQuote(quote.id)
+      toast.success('Quotation created and routed', {
+        description: `Morning Star calculated ${result.quote.serverPricing.risk.toLowerCase()} commercial risk.`,
       })
-      navigate(`/approvals/${quote.id}`)
-    } else {
-      toast.success('Pricing policy passed', { description: 'The order can move directly to fulfillment.' })
-      navigate('/fulfillment')
+      navigate(`/quotations/${result.quote.id}`)
+    } catch (error) {
+      toast.error(error.message ?? 'The quotation could not be created.')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -109,11 +149,16 @@ export default function QuotationBuilderPage() {
         <div>
           <button className="back-link" type="button" onClick={() => navigate('/quotations')}><ArrowLeft size={15} /> Quotations</button>
           <span className="quote-title-line"><h1>{quote.id}</h1><StatusBadge status={quote.stage} /></span>
-          <p>Created {quote.createdAt} · Valid until {quote.validUntil} · Owner {quote.rep}</p>
+          <p>Created {quote.createdAt}{!quote.serverManaged && ` · Valid until ${quote.validUntil}`} · Owner {quote.rep}</p>
         </div>
         <div className="quote-builder-header__actions">
-          <button className="button button--quiet" type="button" onClick={() => toast.success('Draft saved')}>Save draft</button>
-          <button className="button button--primary" type="button" onClick={submitForNextStep}><Send size={15} /> Confirm & route</button>
+          {quote.serverManaged ? (
+            <button className="button button--quiet" type="button" onClick={refreshQuotes}>Refresh quotation</button>
+          ) : (
+            <button className="button button--primary" type="button" onClick={submitForNextStep} disabled={submitting || catalogueLoading}>
+              <Send size={15} /> {submitting ? 'Creating…' : 'Create & route'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -122,23 +167,30 @@ export default function QuotationBuilderPage() {
       <section className="quote-customer-bar">
         <label>
           <span>Customer</span>
-          <input value={quote.customer.name} onChange={(event) => changeCustomer('name', event.target.value)} />
+          {quote.serverManaged ? (
+            <input value={quote.customer.name} disabled />
+          ) : (
+            <select value={quote.customer.id} onChange={(event) => changeCustomer(event.target.value)} disabled={catalogueLoading}>
+              <option value="">Select a customer</option>
+              {customers.map((customer) => (
+                <option value={customer.id} key={customer.id}>{customer.fullName}</option>
+              ))}
+            </select>
+          )}
         </label>
         <label>
           <span>Contact email</span>
-          <input type="email" value={quote.customer.email} onChange={(event) => changeCustomer('email', event.target.value)} placeholder="buyer@company.com" />
+          <input type="email" value={quote.customer.email} placeholder="Select a customer" disabled />
         </label>
         <label>
           <span>Price list</span>
-          <select value={quote.customer.tier} onChange={(event) => changeCustomer('tier', event.target.value)}>
-            <option>Bronze</option><option>Silver</option><option>Gold</option>
-          </select>
+          <input value={quote.customer.tier} placeholder="Assigned automatically" disabled />
         </label>
       </section>
 
       <div className="quote-builder-layout">
         <div className="quote-builder-main">
-          <Panel title="Product catalogue" description="Add hardware, services and recurring plans to this quotation.">
+          {!quote.serverManaged && <Panel title="Product catalogue" description="Add hardware, services and recurring plans to this quotation.">
             <div className="catalogue-toolbar">
               <label className="filter-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search products or SKU" /></label>
               <div className="category-tabs">
@@ -146,6 +198,8 @@ export default function QuotationBuilderPage() {
               </div>
             </div>
             <div className="product-grid">
+              {catalogueLoading && <p className="empty-copy">Loading products and customers…</p>}
+              {!catalogueLoading && catalogueError && <p className="empty-copy">{catalogueError.message}</p>}
               {filteredProducts.map((product) => (
                 <article className="product-card" key={product.id}>
                   <span className={`product-card__icon product-card__icon--${product.category.toLowerCase()}`}>
@@ -156,12 +210,13 @@ export default function QuotationBuilderPage() {
                   <p>{product.description}</p>
                   <footer>
                     <span><strong>{formatMoney(product.price)}</strong><small> / {product.unit}</small></span>
-                    <button type="button" onClick={() => addProduct(quote.id, product.id)}><Plus size={15} /> Add</button>
+                    <button type="button" onClick={() => addProduct(quote.id, product)} disabled={product.stock === 0 && !product.recurring}><Plus size={15} /> Add</button>
                   </footer>
                 </article>
               ))}
+              {!catalogueLoading && !catalogueError && !filteredProducts.length && <p className="empty-copy">No products match this selection.</p>}
             </div>
-          </Panel>
+          </Panel>}
 
           <Panel title="Quotation lines" description="Discount limits are evaluated per line and across the full deal.">
             <div className="quote-lines">
@@ -172,13 +227,13 @@ export default function QuotationBuilderPage() {
                     <span><strong>{line.product.name}</strong><small>{line.product.sku} · {line.product.unit}</small></span>
                   </div>
                   <div className="quantity-control">
-                    <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: Math.max(1, line.quantity - 1) })}><Minus size={13} /></button>
+                    <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: Math.max(1, line.quantity - 1) })} disabled={quote.serverManaged}><Minus size={13} /></button>
                     <strong>{line.quantity}</strong>
-                    <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: line.quantity + 1 })}><Plus size={13} /></button>
+                    <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: line.quantity + 1 })} disabled={quote.serverManaged}><Plus size={13} /></button>
                   </div>
-                  <label className="discount-control"><span>Line discount</span><span><input type="number" min="0" max="60" value={line.discount} onChange={(event) => updateLine(quote.id, line.id, { discount: Number(event.target.value) })} />%</span><small className={line.excess > 0 ? 'text-danger' : 'text-muted'}>Limit {line.allowedDiscount}%</small></label>
-                  <div className="quote-line__total"><strong>{formatMoney(line.net)}</strong><small>{line.marginPercent.toFixed(1)}% margin</small></div>
-                  <button className="icon-button danger-hover" type="button" onClick={() => removeLine(quote.id, line.id)} aria-label={`Remove ${line.product.name}`}><Trash2 size={16} /></button>
+                  <label className="discount-control"><span>Line discount</span><span><input type="number" min="0" max="60" value={line.discount} onChange={(event) => updateLine(quote.id, line.id, { discount: Number(event.target.value) })} disabled={quote.serverManaged} />%</span><small className={line.excess > 0 ? 'text-danger' : 'text-muted'}>Limit {line.allowedDiscount}%</small></label>
+                  <div className="quote-line__total"><strong>{formatMoney(line.net)}</strong><small>{formatPercentage(line.marginPercent)} margin</small></div>
+                  {!quote.serverManaged && <button className="icon-button danger-hover" type="button" onClick={() => removeLine(quote.id, line.id)} aria-label={`Remove ${line.product.name}`}><Trash2 size={16} /></button>}
                 </article>
               ))}
               {!calculation.lines.length && <div className="empty-cart"><PackagePlus size={24} /><strong>Your quotation is empty</strong><span>Add products from the catalogue above.</span></div>}
@@ -192,34 +247,19 @@ export default function QuotationBuilderPage() {
               <RiskGauge score={calculation.riskScore} />
               <div className="health-summary__metrics">
                 <span><small>Net value</small><strong>{formatMoney(calculation.total)}</strong></span>
-                <span><small>Gross margin</small><strong className={calculation.marginPercent < 25 ? 'text-danger' : 'text-success'}>{calculation.marginPercent.toFixed(1)}%</strong></span>
+                <span><small>Gross margin</small><strong className={Number.isFinite(calculation.marginPercent) && calculation.marginPercent < 25 ? 'text-danger' : 'text-success'}>{formatPercentage(calculation.marginPercent)}</strong></span>
                 <span><small>Discount given</small><strong>{formatMoney(calculation.discountValue)}</strong></span>
               </div>
             </div>
             <label className="order-discount">
               <span>Order-level discount</span>
-              <span><input type="number" min="0" max="40" value={quote.orderDiscount} onChange={(event) => updateQuote(quote.id, { orderDiscount: Number(event.target.value) })} />%</span>
+              <span><input type="number" min="0" max="40" value={quote.orderDiscount} onChange={(event) => updateQuote(quote.id, { orderDiscount: Number(event.target.value) })} disabled={quote.serverManaged} />%</span>
             </label>
             <div className={`policy-callout ${calculation.approvalLevel === 'NONE' ? 'success' : 'warning'}`}>
               {calculation.approvalLevel === 'NONE' ? <Check size={16} /> : <AlertTriangle size={16} />}
               <span><strong>{calculation.approvalLevel === 'NONE' ? 'Within policy' : 'Approval required'}</strong><small>{calculation.approvalLevel === 'MANAGER_AND_FINANCE' ? 'Sales Manager → Finance' : calculation.approvalLevel === 'MANAGER' ? 'Sales Manager' : 'Can proceed directly'}</small></span>
             </div>
-            <button className="button button--primary button--full" type="button" onClick={submitForNextStep}>Confirm & continue <ChevronRight size={15} /></button>
-          </Panel>
-
-          <Panel title="Smart suggestions" description="Ranked by co-purchase fit and healthy margin." className="suggestions-panel" action={<Sparkles size={16} className="text-blue" />}>
-            <div className="suggestion-list">
-              {upsellSuggestions.filter((item) => !dismissed.includes(item.id) && !quote.lines.some((line) => line.productId === item.productId)).map((suggestion) => {
-                const product = products.find((item) => item.id === suggestion.productId)
-                return (
-                  <article className="suggestion-card" key={suggestion.id}>
-                    <div><span>{suggestion.promoted && <b>Promoted</b>}<small>+{formatMoney(suggestion.marginDelta)} margin</small></span><strong>{product.name}</strong><p>{suggestion.reason}</p></div>
-                    <footer><button type="button" onClick={() => { addProduct(quote.id, product.id); toast.success(`${product.name} added`) }}><Plus size={13} /> Add to quote</button><button type="button" onClick={() => setDismissed((items) => [...items, suggestion.id])}><X size={13} /> Dismiss</button></footer>
-                  </article>
-                )
-              })}
-              {!upsellSuggestions.some((item) => !dismissed.includes(item.id) && !quote.lines.some((line) => line.productId === item.productId)) && <p className="empty-copy">All relevant suggestions have been reviewed.</p>}
-            </div>
+            {!quote.serverManaged && <button className="button button--primary button--full" type="button" onClick={submitForNextStep} disabled={submitting || catalogueLoading}>{submitting ? 'Creating quotation…' : 'Create & route'} <ChevronRight size={15} /></button>}
           </Panel>
         </aside>
       </div>

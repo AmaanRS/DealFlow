@@ -234,7 +234,13 @@ function normalizeQuoteInput(input) {
 }
 
 function quoteQuery(quoteId) {
-  return Quote.findById(quoteId).populate("subscription_details").lean();
+  return Quote.findById(quoteId)
+    .populate({
+      path: "customer",
+      select: "fullName email _custom_json.tier",
+    })
+    .populate("subscription_details")
+    .lean();
 }
 
 async function revisionForQuote(quoteId) {
@@ -248,6 +254,10 @@ async function sendQuoteList(res, filter, pagination) {
       .sort({ updatedAt: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
+      .populate({
+        path: "customer",
+        select: "fullName email _custom_json.tier",
+      })
       .lean(),
     Quote.countDocuments(filter),
   ]);

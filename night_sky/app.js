@@ -10,12 +10,20 @@ import tierRoutes from "./routes/tier.js";
 
 const app = express();
 const port = config.get("port");
+let databaseReady = false;
 
 app.use(express.json({ limit: "64kb" }));
 app.use("/category", categoryRoutes);
 app.use("/product", productRoutes);
 app.use("/store", storeRoutes);
 app.use("/tier", tierRoutes);
+
+app.get("/health", (_req, res) => {
+  res.status(databaseReady ? 200 : 503).json({
+    service: "night-sky",
+    status: databaseReady ? "ready" : "starting",
+  });
+});
 
 app.use((req, res) => {
   res.status(404).json({
@@ -72,6 +80,7 @@ const server = app.listen(port, async () => {
   try {
     await mongoose.connect(config.get("mongodb.uri"));
     const collections = await initializeCollections();
+    databaseReady = true;
 
     logger.info("Night Sky connected to MongoDB", {
       database: mongoose.connection.name,

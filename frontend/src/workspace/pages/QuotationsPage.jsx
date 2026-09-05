@@ -1,13 +1,13 @@
 import { Filter, LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { calculateQuote, formatMoney } from '../dealMath.js'
+import { calculateQuote, formatMoney, formatPercentage } from '../dealMath.js'
 import { stageMeta } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, StatusBadge } from '../components/Ui.jsx'
 
 export default function QuotationsPage() {
-  const { quotes, createQuote } = useWorkspace()
+  const { quotes, createQuote, quotesError, quotesLoading, refreshQuotes } = useWorkspace()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('ALL')
@@ -67,7 +67,16 @@ export default function QuotationsPage() {
         </div>
       </section>
 
-      {view === 'table' ? (
+      {quotesLoading || quotesError ? (
+        <section className="data-table-wrap">
+          <p className="empty-copy empty-copy--large">
+            {quotesLoading ? 'Loading quotations…' : quotesError.message}
+            {!quotesLoading && quotesError && (
+              <> <button className="link-button" type="button" onClick={refreshQuotes}>Try again</button></>
+            )}
+          </p>
+        </section>
+      ) : view === 'table' ? (
         <section className="data-table-wrap">
           <table className="data-table">
             <thead>
@@ -90,7 +99,7 @@ export default function QuotationsPage() {
                     <td><strong>{quote.customer.name}</strong><small>{quote.customer.tier} price list</small></td>
                     <td>{quote.rep}</td>
                     <td><strong>{formatMoney(calculation.total)}</strong></td>
-                    <td><span className={calculation.marginPercent < 25 ? 'text-danger' : 'text-success'}>{calculation.marginPercent.toFixed(1)}%</span></td>
+                    <td><span className={Number.isFinite(calculation.marginPercent) && calculation.marginPercent < 25 ? 'text-danger' : 'text-success'}>{formatPercentage(calculation.marginPercent)}</span></td>
                     <td><StatusBadge status={quote.stage} /></td>
                     <td>{quote.inactivityDays ? `${quote.inactivityDays}d ago` : 'Today'}</td>
                   </tr>
@@ -109,10 +118,11 @@ export default function QuotationsPage() {
                 <span className="quotation-card__top"><StatusBadge status={quote.stage} /><small>{quote.id}</small></span>
                 <strong>{quote.customer.name}</strong>
                 <span>{quote.customer.tier} customer · {quote.rep}</span>
-                <div><strong>{formatMoney(calculation.total)}</strong><small>{calculation.marginPercent.toFixed(1)}% margin</small></div>
+                <div><strong>{formatMoney(calculation.total)}</strong><small>{formatPercentage(calculation.marginPercent)} margin</small></div>
               </button>
             )
           })}
+          {!filtered.length && <p className="empty-copy empty-copy--large">No quotations match these filters.</p>}
         </section>
       )}
     </div>
