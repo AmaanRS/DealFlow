@@ -4,7 +4,6 @@ import { loadEnvFile } from "node:process";
 try {
   loadEnvFile(new URL("./.env", import.meta.url));
 } catch (error) {
-  // Docker can inject the same values without copying .env into the image.
   if (error?.code !== "ENOENT") {
     throw error;
   }
@@ -29,14 +28,14 @@ convict.addFormat({
 
 const config = convict({
   port: {
-    doc: "Port used by the Night Sky HTTP server",
+    doc: "Port used by the Morning Star HTTP server",
     format: "port",
-    default: 3001,
-    env: "NIGHT_SKY_PORT",
+    default: 3002,
+    env: "MORNING_STAR_PORT",
   },
   mongodb: {
     uri: {
-      doc: "MongoDB connection string used by Night Sky",
+      doc: "MongoDB connection string used by Morning Star",
       format: "mongodb-uri",
       default: "mongodb://localhost:27017/dealflow",
       env: "MONGODB_URI",

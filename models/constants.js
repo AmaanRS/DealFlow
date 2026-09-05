@@ -23,3 +23,22 @@ export const ITEM_CATEGORIES = Object.freeze([
   'SERVICES',
   'SUBSCRIPTION',
 ])
+
+export const QUOTE_STATUSES = Object.freeze([
+  'APPROVED',
+  'REJECTED',
+  'DRAFT',
+  'PENDING_APPROVAL',
+  'NEGOTIATION',
+  'COMPLETED',
+])
+
+export const QUOTE_RISKS = Object.freeze(['LOW', 'MEDIUM', 'HIGH'])
+
+export const SUBSCRIPTION_STATUSES = Object.freeze([
+  'ACTIVE',
+  'PAUSED',
+  'CANCELLED',
+])
+
+export const AUTO_APPROVER = 'AUTO'

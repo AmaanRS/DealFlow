@@ -11,6 +11,7 @@ import { User, Session } from '@app/models/auth'
 import { TierDiscount } from '@app/models/discounts'
 import { Article, Item } from '@app/models/catalog'
 import { USER_ROLES } from '@app/models/constants'
+import { Quote, SubscriptionDetails } from '@app/models/quotes'
 ```
 
 Mongoose is a peer dependency so every service and the shared models resolve the

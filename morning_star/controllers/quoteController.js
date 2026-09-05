@@ -1,0 +1,492 @@
+import mongoose from "mongoose";
+import { logger } from "@app/observability";
+import {
+  AUTO_APPROVER,
+  QUOTE_RISKS,
+  QUOTE_STATUSES,
+  Quote,
+  QuoteRevisionHistory,
+} from "../models.js";
+import {
+  QUOTE_INPUT_FIELDS,
+  priceQuotation,
+  quoteIntentFromSnapshot,
+} from "../services/quotePricing.js";
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+const FILTER_FIELDS = Object.freeze([
+  "status",
+  "risk",
+  "customer",
+  "created_by",
+  "approved_by",
+  "assigned_to",
+  "is_latest_quote",
+]);
+
+class ApiError extends Error {
+  constructor(status, code, message, details) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function requireDatabase() {
+  if (mongoose.connection.readyState !== 1) {
+    throw new ApiError(
+      503,
+      "DATABASE_UNAVAILABLE",
+      "The quotation database is not ready",
+    );
+  }
+}
+
+function requireObject(value, message = "The request body must be a JSON object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "INVALID_REQUEST_BODY", message);
+  }
+
+  return value;
+}
+
+function rejectUnknownFields(value, allowedFields) {
+  const unknownFields = Object.keys(value).filter(
+    (field) => !allowedFields.includes(field),
+  );
+
+  if (unknownFields.length > 0) {
+    throw new ApiError(
+      400,
+      "UNKNOWN_FIELDS",
+      `Unsupported field(s): ${unknownFields.join(", ")}`,
+      { fields: unknownFields },
+    );
+  }
+}
+
+function parsePositiveInteger(value, fallback, name, maximum) {
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    (maximum !== undefined && parsed > maximum)
+  ) {
+    const maximumMessage = maximum === undefined ? "" : ` and at most ${maximum}`;
+    throw new ApiError(
+      400,
+      "INVALID_PAGINATION",
+      `${name} must be a positive integer${maximumMessage}`,
+    );
+  }
+
+  return parsed;
+}
+
+function parsePagination(query) {
+  return {
+    page: parsePositiveInteger(query.page, DEFAULT_PAGE, "page"),
+    limit: parsePositiveInteger(query.limit, DEFAULT_LIMIT, "limit", MAX_LIMIT),
+  };
+}
+
+function parseBoolean(value, field) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+
+  throw new ApiError(400, "INVALID_FILTER", `${field} must be true or false`);
+}
+
+function parseEnumFilter(value, allowedValues, field) {
+  const values = (Array.isArray(value) ? value : String(value).split(","))
+    .map((entry) => String(entry).trim().toUpperCase())
+    .filter(Boolean);
+
+  if (values.length === 0 || values.some((entry) => !allowedValues.includes(entry))) {
+    throw new ApiError(
+      400,
+      "INVALID_FILTER",
+      `${field} must contain only: ${allowedValues.join(", ")}`,
+    );
+  }
+
+  return values.length === 1 ? values[0] : { $in: [...new Set(values)] };
+}
+
+function parseFilterObject(query) {
+  let input = {};
+
+  if (query.filter !== undefined && query.filter !== "") {
+    if (Array.isArray(query.filter)) {
+      throw new ApiError(400, "INVALID_FILTER", "filter must be a JSON object");
+    }
+
+    try {
+      input = JSON.parse(query.filter);
+    } catch {
+      const scalarFilter = query.filter.trim().toUpperCase();
+
+      if (QUOTE_STATUSES.includes(scalarFilter)) {
+        input = { status: scalarFilter };
+      } else if (QUOTE_RISKS.includes(scalarFilter)) {
+        input = { risk: scalarFilter };
+      } else {
+        throw new ApiError(
+          400,
+          "INVALID_FILTER",
+          "filter must be a quote status, risk, or valid JSON object",
+        );
+      }
+    }
+
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new ApiError(400, "INVALID_FILTER", "filter must be a JSON object");
+    }
+  }
+
+  for (const field of FILTER_FIELDS) {
+    if (query[field] !== undefined) input[field] = query[field];
+  }
+
+  const allowedQueryFields = new Set(["filter", "page", "limit", ...FILTER_FIELDS]);
+  const unknownQueryFields = Object.keys(query).filter(
+    (field) => !allowedQueryFields.has(field),
+  );
+  if (unknownQueryFields.length > 0) {
+    throw new ApiError(
+      400,
+      "INVALID_FILTER",
+      `Unsupported filter(s): ${unknownQueryFields.join(", ")}`,
+      { fields: unknownQueryFields },
+    );
+  }
+
+  rejectUnknownFields(input, FILTER_FIELDS);
+
+  const filter = {};
+  for (const [field, value] of Object.entries(input)) {
+    if (value === undefined || value === null || value === "") continue;
+
+    if (field === "status") {
+      filter.status = parseEnumFilter(value, QUOTE_STATUSES, field);
+    } else if (field === "risk") {
+      filter.risk = parseEnumFilter(value, QUOTE_RISKS, field);
+    } else if (field === "is_latest_quote") {
+      filter.is_latest_quote = parseBoolean(value, field);
+    } else if (field === "customer") {
+      if (!mongoose.isObjectIdOrHexString(value)) {
+        throw new ApiError(
+          400,
+          "INVALID_FILTER",
+          "customer must be a valid MongoDB ObjectId",
+        );
+      }
+      filter.customer = String(value);
+    } else {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new ApiError(400, "INVALID_FILTER", `${field} must be a string`);
+      }
+      const normalizedValue = value.trim();
+      filter[field] =
+        field === "approved_by" && normalizedValue.toUpperCase() === AUTO_APPROVER
+          ? AUTO_APPROVER
+          : normalizedValue.toLowerCase();
+    }
+  }
+
+  if (filter.is_latest_quote === undefined) filter.is_latest_quote = true;
+  return filter;
+}
+
+function normalizeQuoteInput(input) {
+  const normalized = { ...input };
+  const effectiveStatus = normalized.status ?? "DRAFT";
+  const effectiveRisk = normalized.risk ?? "LOW";
+
+  if (
+    effectiveStatus === "APPROVED" &&
+    effectiveRisk === "LOW" &&
+    (normalized.approved_by === undefined || normalized.approved_by === null ||
+      normalized.approved_by === "")
+  ) {
+    normalized.approved_by = AUTO_APPROVER;
+  }
+
+  if (
+    effectiveStatus === "APPROVED" &&
+    effectiveRisk !== "LOW" &&
+    (!normalized.approved_by || normalized.approved_by === AUTO_APPROVER)
+  ) {
+    throw new ApiError(
+      400,
+      "APPROVER_REQUIRED",
+      "MEDIUM and HIGH risk approved quotations require an approver email",
+    );
+  }
+
+  return normalized;
+}
+
+function quoteQuery(quoteId) {
+  return Quote.findById(quoteId).populate("subscription_details").lean();
+}
+
+async function revisionForQuote(quoteId) {
+  return QuoteRevisionHistory.findOne({ quote_id: quoteId }).lean();
+}
+
+async function sendQuoteList(res, filter, pagination) {
+  const { page, limit } = pagination;
+  const [quotes, total] = await Promise.all([
+    Quote.find(filter)
+      .sort({ updatedAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Quote.countDocuments(filter),
+  ]);
+
+  res.json({
+    quotes,
+    pagination: {
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit),
+    },
+  });
+}
+
+export async function getQuotes(req, res) {
+  requireDatabase();
+  const pagination = parsePagination(req.query);
+  const filter = parseFilterObject(req.query);
+  await sendQuoteList(res, filter, pagination);
+}
+
+export async function getApprovedQuotes(req, res) {
+  requireDatabase();
+  const pagination = parsePagination(req.query);
+  const filter = parseFilterObject(req.query);
+  filter.status = "APPROVED";
+  filter.is_latest_quote = true;
+  await sendQuoteList(res, filter, pagination);
+}
+
+export async function getQuote(req, res) {
+  requireDatabase();
+
+  if (!mongoose.isObjectIdOrHexString(req.params.quote_id)) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_ID",
+      "quote_id must be a valid MongoDB ObjectId",
+    );
+  }
+
+  const [quote, revision] = await Promise.all([
+    quoteQuery(req.params.quote_id),
+    revisionForQuote(req.params.quote_id),
+  ]);
+
+  if (!quote) {
+    throw new ApiError(404, "QUOTE_NOT_FOUND", "Quotation not found");
+  }
+
+  res.json({ quote, revision });
+}
+
+export async function createQuotation(req, res) {
+  requireDatabase();
+  const body = requireObject(req.body);
+  rejectUnknownFields(body, QUOTE_INPUT_FIELDS);
+
+  let quote;
+  let revision;
+  try {
+    const pricedQuotation = await priceQuotation(body);
+    quote = await Quote.create({
+      ...normalizeQuoteInput(pricedQuotation),
+      is_latest_quote: true,
+    });
+    revision = await QuoteRevisionHistory.create({
+      quote_version: 1,
+      quote_id: quote._id,
+    });
+    const createdQuote = await quoteQuery(quote._id);
+
+    logger.info("Quotation created", {
+      quote_id: String(quote._id),
+      negotiation_id: revision.negotiation_id,
+    });
+
+    res.status(201).json({ quote: createdQuote, revision: revision.toObject() });
+  } catch (error) {
+    await Promise.allSettled([
+      revision?._id
+        ? QuoteRevisionHistory.deleteOne({ _id: revision._id })
+        : Promise.resolve(),
+      quote?._id ? Quote.deleteOne({ _id: quote._id }) : Promise.resolve(),
+    ]);
+    throw error;
+  }
+}
+
+export async function updateQuotation(req, res) {
+  requireDatabase();
+  const body = requireObject(req.body);
+  const { quote_id: quoteId, expected_version: expectedVersion } = body;
+
+  if (!mongoose.isObjectIdOrHexString(quoteId)) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_ID",
+      "quote_id must be a valid MongoDB ObjectId",
+    );
+  }
+
+  if (
+    expectedVersion !== undefined &&
+    (!Number.isInteger(expectedVersion) || expectedVersion < 1)
+  ) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_VERSION",
+      "expected_version must be a positive integer",
+    );
+  }
+
+  let updates;
+  if (body.updates !== undefined) {
+    rejectUnknownFields(body, ["quote_id", "expected_version", "updates"]);
+    updates = requireObject(body.updates, "updates must be a JSON object");
+  } else {
+    updates = Object.fromEntries(
+      Object.entries(body).filter(
+        ([field]) => !["quote_id", "expected_version"].includes(field),
+      ),
+    );
+  }
+  rejectUnknownFields(updates, QUOTE_INPUT_FIELDS);
+
+  if (Object.keys(updates).length === 0) {
+    throw new ApiError(
+      400,
+      "EMPTY_UPDATE",
+      "At least one quotation field must be provided",
+    );
+  }
+
+  const [currentQuote, currentRevision] = await Promise.all([
+    Quote.findById(quoteId).lean(),
+    revisionForQuote(quoteId),
+  ]);
+
+  if (!currentQuote) {
+    throw new ApiError(404, "QUOTE_NOT_FOUND", "Quotation not found");
+  }
+  if (!currentQuote.is_latest_quote) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "The quotation is not the latest revision",
+    );
+  }
+  if (!currentRevision) {
+    throw new ApiError(
+      409,
+      "QUOTE_REVISION_MISSING",
+      "The quotation does not have revision history",
+    );
+  }
+  if (
+    expectedVersion !== undefined &&
+    expectedVersion !== currentRevision.quote_version
+  ) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "The quotation changed. Reload and retry.",
+      { current_version: currentRevision.quote_version },
+    );
+  }
+
+  const latestRevision = await QuoteRevisionHistory.findOne({
+    negotiation_id: currentRevision.negotiation_id,
+  })
+    .sort({ quote_version: -1 })
+    .lean();
+
+  if (
+    !latestRevision ||
+    String(latestRevision.quote_id) !== String(currentQuote._id)
+  ) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "The quotation is not the latest revision",
+    );
+  }
+
+  const nextIntent = {
+    ...quoteIntentFromSnapshot(currentQuote),
+    ...updates,
+  };
+  const nextValues = normalizeQuoteInput(await priceQuotation(nextIntent));
+
+  const acquired = await Quote.updateOne(
+    { _id: currentQuote._id, is_latest_quote: true },
+    { $set: { is_latest_quote: false } },
+  );
+  if (acquired.modifiedCount !== 1) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "The quotation changed. Reload and retry.",
+    );
+  }
+
+  let newQuote;
+  let newRevision;
+  try {
+    newQuote = await Quote.create({
+      ...nextValues,
+      is_latest_quote: true,
+    });
+    newRevision = await QuoteRevisionHistory.create({
+      quote_version: latestRevision.quote_version + 1,
+      negotiation_id: currentRevision.negotiation_id,
+      quote_id: newQuote._id,
+    });
+    const updatedQuote = await quoteQuery(newQuote._id);
+
+    logger.info("Quotation revision created", {
+      previous_quote_id: String(currentQuote._id),
+      quote_id: String(newQuote._id),
+      negotiation_id: newRevision.negotiation_id,
+      quote_version: newRevision.quote_version,
+    });
+
+    res.json({ quote: updatedQuote, revision: newRevision.toObject() });
+  } catch (error) {
+    await Promise.allSettled([
+      newRevision?._id
+        ? QuoteRevisionHistory.deleteOne({ _id: newRevision._id })
+        : Promise.resolve(),
+      newQuote?._id ? Quote.deleteOne({ _id: newQuote._id }) : Promise.resolve(),
+    ]);
+    await Quote.updateOne(
+      { _id: currentQuote._id },
+      { $set: { is_latest_quote: true } },
+    );
+    throw error;
+  }
+}
+
+export { ApiError };
