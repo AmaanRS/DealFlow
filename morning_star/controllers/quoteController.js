@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { createLogger } from "@app/observability";
 import { promoteCustomerTier } from "@app/models/auth";
-import { Article } from "@app/models/catalog";
+import { Article, resolveLatestReportingHsns } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
   Billing,
@@ -484,14 +484,59 @@ async function applyCompletedQuoteToCustomer(quote) {
   }
 }
 
-function quoteQuery(quoteId) {
-  return Quote.findById(quoteId)
+async function useLatestQuoteReportingHsns(quotes) {
+  const availableQuotes = quotes.filter(Boolean);
+  const reportingHsnCodes = availableQuotes.flatMap((quote) => [
+    ...(quote.products ?? []).map((product) => product.hsn),
+    ...(quote.subscription_details ?? []).map(
+      (subscription) => subscription?.hsn,
+    ),
+  ]);
+  const latestByReportingHsn = await resolveLatestReportingHsns(
+    reportingHsnCodes,
+  );
+
+  return quotes.map((quote) => {
+    if (!quote) return quote;
+
+    return {
+      ...quote,
+      products: (quote.products ?? []).map((product) => ({
+        ...product,
+        hsn:
+          latestByReportingHsn.get(product.hsn)?.reporting_hsn ?? product.hsn,
+      })),
+      subscription_details: (quote.subscription_details ?? []).map(
+        (subscription) => {
+          if (
+            !subscription ||
+            typeof subscription !== "object" ||
+            typeof subscription.hsn !== "string"
+          ) {
+            return subscription;
+          }
+
+          return {
+            ...subscription,
+            hsn:
+              latestByReportingHsn.get(subscription.hsn)?.reporting_hsn ??
+              subscription.hsn,
+          };
+        },
+      ),
+    };
+  });
+}
+
+async function quoteQuery(quoteId) {
+  const quote = await Quote.findById(quoteId)
     .populate({
       path: "customer",
       select: "fullName email _custom_json.tier _custom_json.total_price",
     })
     .populate("subscription_details")
     .lean();
+  return (await useLatestQuoteReportingHsns([quote]))[0];
 }
 
 async function revisionForQuote(quoteId) {
@@ -512,9 +557,10 @@ async function sendQuoteList(res, filter, pagination) {
       .lean(),
     Quote.countDocuments(filter),
   ]);
+  const currentQuotes = await useLatestQuoteReportingHsns(quotes);
 
   res.json({
-    quotes,
+    quotes: currentQuotes,
     pagination: {
       page,
       limit,

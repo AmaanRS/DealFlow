@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import mongoose from 'mongoose'
 import { User } from './auth.js'
-import { Article, Hsn, Item, Store } from './catalog.js'
+import {
+  Article,
+  Hsn,
+  Item,
+  Store,
+  resolveLatestReportingHsn,
+} from './catalog.js'
 import { RiskConfiguration } from './risk.js'
 import {
   AUTO_APPROVER,
@@ -335,21 +341,16 @@ subscriptionDetailsSchema.pre('validate', async function deriveSubscriptionPrici
     return
   }
 
-  const hsn = await HsnModel.findOne({
-    'reporting_hsn.reporting_hsn': item.reporting_hsn,
+  const reportingHsn = await resolveLatestReportingHsn(item.reporting_hsn, {
+    HsnModel,
   })
-    .select('reporting_hsn')
-    .lean()
-  const reportingHsn = hsn?.reporting_hsn.find(
-    (entry) => entry.reporting_hsn === item.reporting_hsn,
-  )
 
   if (!reportingHsn) {
     this.invalidate('hsn', 'The item must reference an existing reporting HSN')
     return
   }
 
-  this.hsn = item.reporting_hsn
+  this.hsn = reportingHsn.reporting_hsn
   this.item_id = article.item_id
   this.subscription_price = article.price
   this.selling_price = Math.round(

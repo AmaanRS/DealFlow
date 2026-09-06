@@ -282,6 +282,61 @@ export const Article =
   mongoose.models.Article ?? mongoose.model('Article', articleSchema)
 export const Item = mongoose.models.Item ?? mongoose.model('Item', itemSchema)
 
+export function latestReportingHsnEntry(hsnDocument) {
+  const entries = hsnDocument?.reporting_hsn ?? []
+  return entries.length > 0 ? entries.at(-1) : null
+}
+
+export async function resolveLatestReportingHsns(
+  reportingHsnCodes,
+  { HsnModel = Hsn } = {},
+) {
+  const normalizedCodes = [
+    ...new Set(
+      (reportingHsnCodes ?? [])
+        .filter((code) => typeof code === 'string')
+        .map((code) => code.trim())
+        .filter(Boolean),
+    ),
+  ]
+
+  if (normalizedCodes.length === 0) return new Map()
+
+  const hsnDocuments = await HsnModel.find({
+    'reporting_hsn.reporting_hsn': { $in: normalizedCodes },
+  })
+    .select('hsn_code reporting_hsn')
+    .lean()
+  const requestedCodes = new Set(normalizedCodes)
+  const latestByReportingHsn = new Map()
+
+  for (const hsnDocument of hsnDocuments) {
+    const latest = latestReportingHsnEntry(hsnDocument)
+    if (!latest) continue
+
+    for (const entry of hsnDocument.reporting_hsn ?? []) {
+      if (!requestedCodes.has(entry.reporting_hsn)) continue
+
+      latestByReportingHsn.set(entry.reporting_hsn, {
+        _id: latest._id,
+        hsn_code: hsnDocument.hsn_code,
+        reporting_hsn: latest.reporting_hsn,
+        gst: latest.gst,
+      })
+    }
+  }
+
+  return latestByReportingHsn
+}
+
+export async function resolveLatestReportingHsn(reportingHsnCode, options) {
+  const latestByReportingHsn = await resolveLatestReportingHsns(
+    [reportingHsnCode],
+    options,
+  )
+  return latestByReportingHsn.get(reportingHsnCode?.trim()) ?? null
+}
+
 export async function appendReportingHsn(hsnCode, gst) {
   const normalizedHsnCode = hsnCode.trim()
 

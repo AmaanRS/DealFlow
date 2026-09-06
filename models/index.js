@@ -36,6 +36,9 @@ export {
   Store,
   appendReportingHsn,
   initializeCollections,
+  latestReportingHsnEntry,
+  resolveLatestReportingHsn,
+  resolveLatestReportingHsns,
 } from './catalog.js'
 export {
   Billing,

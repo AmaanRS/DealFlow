@@ -6,6 +6,9 @@ export {
   Store,
   appendReportingHsn,
   initializeCollections,
+  latestReportingHsnEntry,
+  resolveLatestReportingHsn,
+  resolveLatestReportingHsns,
 } from "@app/models/catalog";
 
 export { CategoryDiscount, TierDiscount } from "@app/models/discounts";

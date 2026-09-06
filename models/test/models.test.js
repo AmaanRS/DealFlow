@@ -20,6 +20,8 @@ import {
   SubscriptionRevisionHistory,
   TierDiscount,
   User,
+  latestReportingHsnEntry,
+  resolveLatestReportingHsns,
   selectPromotedTier,
 } from '../index.js'
 import {
@@ -131,6 +133,49 @@ test('CategoryDiscount applies zero defaults and rejects invalid discounts', asy
     new CategoryDiscount({ subscription: 1 }).validate(),
     (error) => error.errors.subscription?.message === 'subscription must be 0',
   )
+})
+
+test('latest reporting HSN resolution maps every prior code to the newest entry', async () => {
+  const hsnDocument = {
+    hsn_code: '8471',
+    reporting_hsn: [
+      { _id: 'first', reporting_hsn: '8471H1', gst: 12 },
+      { _id: 'second', reporting_hsn: '8471H2', gst: 18 },
+    ],
+  }
+  let receivedFilter
+  const HsnModel = {
+    find(filter) {
+      receivedFilter = filter
+      return {
+        select() {
+          return this
+        },
+        async lean() {
+          return [hsnDocument]
+        },
+      }
+    },
+  }
+
+  assert.equal(latestReportingHsnEntry(hsnDocument).reporting_hsn, '8471H2')
+  assert.equal(latestReportingHsnEntry({ reporting_hsn: [] }), null)
+
+  const resolved = await resolveLatestReportingHsns(
+    ['8471H1', '8471H2'],
+    { HsnModel },
+  )
+
+  assert.deepEqual(receivedFilter, {
+    'reporting_hsn.reporting_hsn': { $in: ['8471H1', '8471H2'] },
+  })
+  assert.deepEqual(resolved.get('8471H1'), {
+    _id: 'second',
+    hsn_code: '8471',
+    reporting_hsn: '8471H2',
+    gst: 18,
+  })
+  assert.deepEqual(resolved.get('8471H2'), resolved.get('8471H1'))
 })
 
 test('every shared model keeps its established MongoDB collection name', () => {

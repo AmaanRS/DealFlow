@@ -4,10 +4,11 @@ import {
   appendReportingHsn,
   Article,
   CategoryDiscount,
-  Hsn,
   ITEM_CATEGORIES,
   Item,
   Quote,
+  resolveLatestReportingHsn,
+  resolveLatestReportingHsns,
   Store,
 } from "../models.js";
 
@@ -35,8 +36,27 @@ function isDatabaseReady() {
   return mongoose.connection.readyState === 1;
 }
 
-function productQuery(itemId) {
-  return Item.findById(itemId).populate("all_identifiers").lean();
+async function useLatestReportingHsns(products) {
+  const availableProducts = products.filter(Boolean);
+  const latestByReportingHsn = await resolveLatestReportingHsns(
+    availableProducts.map((product) => product.reporting_hsn),
+  );
+
+  return products.map((product) => {
+    if (!product) return product;
+
+    const latest = latestByReportingHsn.get(product.reporting_hsn);
+    return latest
+      ? { ...product, reporting_hsn: latest.reporting_hsn }
+      : product;
+  });
+}
+
+async function productQuery(itemId) {
+  const product = await Item.findById(itemId)
+    .populate("all_identifiers")
+    .lean();
+  return (await useLatestReportingHsns([product]))[0];
 }
 
 function parsePositiveInteger(value, fallback, maximum) {
@@ -216,9 +236,10 @@ export async function getProducts(req, res) {
       .lean(),
     Item.countDocuments(filter),
   ]);
+  const currentProducts = await useLatestReportingHsns(products);
 
   res.json({
-    products,
+    products: currentProducts,
     pagination: {
       page,
       limit,
@@ -370,12 +391,11 @@ export async function createProduct(req, res) {
   }
 
   const normalizedReportingHsn = reporting_hsn.trim();
+  const latestReportingHsn = await resolveLatestReportingHsn(
+    normalizedReportingHsn,
+  );
 
-  if (
-    !(await Hsn.exists({
-      "reporting_hsn.reporting_hsn": normalizedReportingHsn,
-    }))
-  ) {
+  if (!latestReportingHsn) {
     res.status(404).json({
       code: "REPORTING_HSN_NOT_FOUND",
       message: "The reporting_hsn does not exist",
@@ -388,7 +408,7 @@ export async function createProduct(req, res) {
   try {
     item = await Item.create({
       name,
-      reporting_hsn: normalizedReportingHsn,
+      reporting_hsn: latestReportingHsn.reporting_hsn,
       categories,
       cycle,
       all_identifiers: [],

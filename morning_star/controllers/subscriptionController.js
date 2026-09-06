@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { createLogger } from "@app/observability";
+import { resolveLatestReportingHsns } from "@app/models/catalog";
 import {
   SUBSCRIPTION_STATUSES,
   SubscriptionDetails,
@@ -63,11 +64,48 @@ function parsePositiveInteger(value, fallback, name, maximum) {
   return parsed;
 }
 
-function subscriptionQuery(subscriptionId) {
-  return SubscriptionDetails.findById(subscriptionId)
+async function useLatestSubscriptionReportingHsns(subscriptions) {
+  const latestByReportingHsn = await resolveLatestReportingHsns(
+    subscriptions
+      .filter(Boolean)
+      .flatMap((subscription) => [
+        subscription.hsn,
+        subscription.item_id?.reporting_hsn,
+      ]),
+  );
+
+  return subscriptions.map((subscription) => {
+    if (!subscription) return subscription;
+
+    const currentSubscriptionHsn =
+      latestByReportingHsn.get(subscription.hsn)?.reporting_hsn ??
+      subscription.hsn;
+    const populatedItem =
+      subscription.item_id &&
+      typeof subscription.item_id === "object" &&
+      typeof subscription.item_id.reporting_hsn === "string"
+        ? {
+            ...subscription.item_id,
+            reporting_hsn:
+              latestByReportingHsn.get(subscription.item_id.reporting_hsn)
+                ?.reporting_hsn ?? subscription.item_id.reporting_hsn,
+          }
+        : subscription.item_id;
+
+    return {
+      ...subscription,
+      hsn: currentSubscriptionHsn,
+      item_id: populatedItem,
+    };
+  });
+}
+
+async function subscriptionQuery(subscriptionId) {
+  const subscription = await SubscriptionDetails.findById(subscriptionId)
     .populate("article_id")
     .populate("item_id")
     .lean();
+  return (await useLatestSubscriptionReportingHsns([subscription]))[0];
 }
 
 function normalizeStatus(value) {
@@ -259,9 +297,11 @@ export async function getSubscriptions(req, res) {
       .lean(),
     SubscriptionDetails.countDocuments(filter),
   ]);
+  const currentSubscriptions =
+    await useLatestSubscriptionReportingHsns(subscriptions);
 
   res.json({
-    subscriptions,
+    subscriptions: currentSubscriptions,
     pagination: {
       page,
       limit,

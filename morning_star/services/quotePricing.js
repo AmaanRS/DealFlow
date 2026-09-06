@@ -1,7 +1,11 @@
 import mongoose from "mongoose";
 import { AUTO_APPROVER } from "@app/models/constants";
 import { User } from "@app/models/auth";
-import { Article, Hsn, Item } from "@app/models/catalog";
+import {
+  Article,
+  Item,
+  resolveLatestReportingHsns,
+} from "@app/models/catalog";
 import { CategoryDiscount, TierDiscount } from "@app/models/discounts";
 import {
   RISK_CONFIGURATION_ID,
@@ -290,18 +294,6 @@ function selectCategory(product, item, index) {
   );
 }
 
-function reportingHsnMap(hsnDocuments) {
-  const result = new Map();
-
-  for (const hsnDocument of hsnDocuments) {
-    for (const entry of hsnDocument.reporting_hsn ?? []) {
-      result.set(entry.reporting_hsn, entry);
-    }
-  }
-
-  return result;
-}
-
 export async function priceQuotation(input, { inventoryCredits = new Map() } = {}) {
   if (!mongoose.isObjectIdOrHexString(input.customer)) {
     throw pricingError(
@@ -387,15 +379,9 @@ export async function priceQuotation(input, { inventoryCredits = new Map() } = {
     .select("name reporting_hsn categories")
     .lean();
   const itemById = new Map(items.map((item) => [String(item._id), item]));
-  const reportingHsnCodes = [
-    ...new Set(items.map((item) => item.reporting_hsn)),
-  ];
-  const hsns = await Hsn.find({
-    "reporting_hsn.reporting_hsn": { $in: reportingHsnCodes },
-  })
-    .select("reporting_hsn")
-    .lean();
-  const hsnByCode = reportingHsnMap(hsns);
+  const hsnByCode = await resolveLatestReportingHsns(
+    items.map((item) => item.reporting_hsn),
+  );
 
   const effectiveTierDiscount = configuredPercentage(
     tierDiscount.discount,
@@ -461,7 +447,7 @@ export async function priceQuotation(input, { inventoryCredits = new Map() } = {
       categoryDiscount[categoryField],
       `${category} category discount`,
     );
-    const gst = configuredPercentage(hsn.gst, `GST for ${item.reporting_hsn}`);
+    const gst = configuredPercentage(hsn.gst, `GST for ${hsn.reporting_hsn}`);
     const basePrice = article.price * product.inv;
     let lineDiscountedPrice = basePrice;
 
@@ -500,7 +486,7 @@ export async function priceQuotation(input, { inventoryCredits = new Map() } = {
       article_id: article._id,
       item_id: item._id,
       name: item.name,
-      hsn: item.reporting_hsn,
+      hsn: hsn.reporting_hsn,
       category,
       gst,
       unit_price: article.price,

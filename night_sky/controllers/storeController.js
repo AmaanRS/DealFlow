@@ -1,7 +1,13 @@
 import mongoose from "mongoose";
 import { getDistance } from "geolib";
 import { createLogger } from "@app/observability";
-import { Article, Quote, Store, User } from "../models.js";
+import {
+  Article,
+  Quote,
+  resolveLatestReportingHsns,
+  Store,
+  User,
+} from "../models.js";
 
 const logger = createLogger("night-sky.store-controller", {
   "service.component": "store-controller",
@@ -351,8 +357,20 @@ export async function splitQuoteByStore(req, res) {
     ),
   });
 
+  const latestByReportingHsn = await resolveLatestReportingHsns(
+    updatedQuote.products.map((product) => product.hsn),
+  );
+  const responseQuote = {
+    ...updatedQuote,
+    products: updatedQuote.products.map((product) => ({
+      ...product,
+      hsn:
+        latestByReportingHsn.get(product.hsn)?.reporting_hsn ?? product.hsn,
+    })),
+  };
+
   res.json({
-    quote: updatedQuote,
+    quote: responseQuote,
     store_split: assignments.map((assignment) => ({
       product_index: assignment.product_index,
       quoted_article_id: assignment.quoted_article_id,
