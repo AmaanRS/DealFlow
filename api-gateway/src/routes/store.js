@@ -127,7 +127,7 @@ router.post(
 
 router.patch(
   '/manual_store_split',
-  requireRoles(USER_ROLES.ADMIN, USER_ROLES.SALES_REP, USER_ROLES.MANAGER),
+  requireRoles(USER_ROLES.ADMIN, USER_ROLES.SALES_REP, USER_ROLES.FINANCE),
   asyncRoute(async (req, res) => {
     if (req.auth.user.role === USER_ROLES.SALES_REP) {
       const current = await callQuoteService(

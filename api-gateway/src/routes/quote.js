@@ -359,6 +359,40 @@ router.patch(
   }),
 )
 
+router.post(
+  '/start_negotiation',
+  requireRoles(USER_ROLES.SALES_REP, USER_ROLES.FINANCE),
+  asyncRoute(async (req, res) => {
+    const body = req.body
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      typeof body.quote_id !== 'string' ||
+      Object.keys(body).some((field) => field !== 'quote_id')
+    ) {
+      res.status(400).json({
+        code: 'INVALID_REQUEST_BODY',
+        message: 'quote_id is required and no other fields are supported.',
+      })
+      return
+    }
+
+    const visible = await assertQuoteVisible(req, res, body.quote_id)
+    if (!visible) return
+
+    setRequestAttributes(req, {
+      'quote.id': body.quote_id,
+      'quote.operation': 'start_negotiation',
+    })
+    const result = await callQuoteService(req, '/quote/start_negotiation', {
+      method: 'POST',
+      body: { quote_id: body.quote_id },
+    })
+    sendUpstreamResponse(req, res, result, 'start_negotiation')
+  }),
+)
+
 router.get(
   '/approved_quotes',
   requireRoles(...quoteReaderRoles),

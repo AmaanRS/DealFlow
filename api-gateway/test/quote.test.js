@@ -42,6 +42,14 @@ test('sales quotation creation is registered on the gateway', () => {
   assert.equal(route?.methods.post, true)
 })
 
+test('approved quotations can explicitly enter negotiation after fulfillment', () => {
+  const route = quoteRoutes.stack.find(
+    (layer) => layer.route?.path === '/start_negotiation',
+  )?.route
+
+  assert.equal(route?.methods.post, true)
+})
+
 test('quotation creation trusts session ownership and gateway reviewer assignment', () => {
   const body = buildCreateQuotationBody(
     {

@@ -6,6 +6,7 @@ import {
   getQuote,
   getQuoteHistory,
   getQuotes,
+  startQuoteNegotiation,
   updateQuotation,
 } from "../controllers/quoteController.js";
 
@@ -23,6 +24,7 @@ router.get("/at_risk_deals", asyncRoute(getAtRiskDeals));
 router.get("/:quote_id/history", asyncRoute(getQuoteHistory));
 router.get("/:quote_id", asyncRoute(getQuote));
 router.post("/new_quotation", asyncRoute(createQuotation));
+router.post("/start_negotiation", asyncRoute(startQuoteNegotiation));
 router.patch("/quotation", asyncRoute(updateQuotation));
 
 export default router;

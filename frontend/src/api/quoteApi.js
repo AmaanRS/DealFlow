@@ -58,6 +58,13 @@ export const quoteApi = {
     return request(`/v1/api/customer/${encodeURIComponent(quoteId)}/invoice`)
   },
 
+  startNegotiation(quoteId) {
+    return request(`${QUOTE_BASE_URL}/start_negotiation`, {
+      method: 'POST',
+      body: JSON.stringify({ quote_id: quoteId }),
+    })
+  },
+
   create(payload) {
     return request(`${QUOTE_BASE_URL}/new_quotation`, {
       method: 'POST',

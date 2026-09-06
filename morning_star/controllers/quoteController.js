@@ -294,17 +294,37 @@ async function releaseInventoryReservations(reservations) {
   );
 }
 
-async function reserveQuoteInventory(products) {
+function fulfillmentAllocations(products, fulfillmentDetails = []) {
+  let physicalIndex = 0;
+  return products.flatMap((product) => {
+    if (product.category === "SUBSCRIPTION") return [];
+    const fulfillment = fulfillmentDetails[physicalIndex];
+    physicalIndex += 1;
+    return [{ product, fulfillment }];
+  });
+}
+
+function allocatedArticleFilter(product, fulfillment) {
+  if (fulfillment?.seller_identifier && fulfillment?.store) {
+    return {
+      seller_identifier: fulfillment.seller_identifier,
+      store_id: fulfillment.store,
+    };
+  }
+  return { _id: product.article_id };
+}
+
+async function reserveQuoteInventory(products, fulfillmentDetails = []) {
   const reservations = [];
 
   try {
-    for (const product of products) {
-      if (product.category === "SUBSCRIPTION") continue;
-
-      const articleId = product.article_id;
+    for (const { product, fulfillment } of fulfillmentAllocations(
+      products,
+      fulfillmentDetails,
+    )) {
       const reservedArticle = await Article.findOneAndUpdate(
         {
-          _id: articleId,
+          ...allocatedArticleFilter(product, fulfillment),
           "inventory.sellable": { $gte: product.inv },
         },
         {
@@ -320,12 +340,12 @@ async function reserveQuoteInventory(products) {
         throw new ApiError(
           409,
           "INSUFFICIENT_INVENTORY",
-          `Article ${articleId} does not have enough sellable inventory to enter negotiation`,
-          { article_id: String(articleId), requested: product.inv },
+          `The allocated article for ${product.name} does not have enough sellable inventory to enter negotiation`,
+          { article_id: String(product.article_id), requested: product.inv },
         );
       }
 
-      reservations.push({ article_id: articleId, inv: product.inv });
+      reservations.push({ article_id: reservedArticle._id, inv: product.inv });
     }
 
     return reservations;
@@ -366,20 +386,23 @@ async function restoreReleasedInventory(releases) {
   );
 }
 
-async function releaseQuoteInventory(products) {
+async function releaseQuoteInventory(products, fulfillmentDetails = []) {
   const releases = [];
 
   try {
-    for (const [articleId, inv] of inventoryByArticle(products)) {
+    for (const { product, fulfillment } of fulfillmentAllocations(
+      products,
+      fulfillmentDetails,
+    )) {
       const releasedArticle = await Article.findOneAndUpdate(
         {
-          _id: articleId,
-          "inventory.reserved": { $gte: inv },
+          ...allocatedArticleFilter(product, fulfillment),
+          "inventory.reserved": { $gte: product.inv },
         },
         {
           $inc: {
-            "inventory.sellable": inv,
-            "inventory.reserved": -inv,
+            "inventory.sellable": product.inv,
+            "inventory.reserved": -product.inv,
           },
         },
         { returnDocument: "after" },
@@ -389,12 +412,15 @@ async function releaseQuoteInventory(products) {
         throw new ApiError(
           409,
           "INSUFFICIENT_RESERVED_INVENTORY",
-          `Article ${articleId} does not contain the inventory reserved by this quotation`,
-          { article_id: articleId, expected_reserved: inv },
+          `The allocated article for ${product.name} does not contain the inventory reserved by this quotation`,
+          {
+            article_id: String(product.article_id),
+            expected_reserved: product.inv,
+          },
         );
       }
 
-      releases.push({ article_id: articleId, inv });
+      releases.push({ article_id: releasedArticle._id, inv: product.inv });
     }
 
     return releases;
@@ -440,28 +466,16 @@ async function createSubscriptionRecords(products) {
   }
 }
 
-async function advanceApprovedSubscriptionQuote(quote) {
+async function advanceApprovedQuoteToNegotiation(quote) {
   const subscriptionProducts = quote.products.filter(
     (product) => product.category === "SUBSCRIPTION",
   );
-  if (quote.status !== "APPROVED" || subscriptionProducts.length === 0) {
-    const billing =
-      quote.status === "NEGOTIATION"
-        ? await createBillingInvoice(quote._id)
-        : null;
-    return {
-      quote,
-      billing,
-      reservations: [],
-      subscriptions: [],
-      subscriptionRevisions: [],
-    };
-  }
 
   const { subscriptions, revisions: subscriptionRevisions } =
     await createSubscriptionRecords(subscriptionProducts);
   let reservations = [];
   let billing;
+  let transitioned = false;
 
   try {
     const negotiationQuote = await Quote.findOneAndUpdate(
@@ -483,8 +497,12 @@ async function advanceApprovedSubscriptionQuote(quote) {
         "The quotation changed while subscriptions were being created",
       );
     }
+    transitioned = true;
 
-    reservations = await reserveQuoteInventory(negotiationQuote.products);
+    reservations = await reserveQuoteInventory(
+      negotiationQuote.products,
+      negotiationQuote.fulfillment_details,
+    );
     billing = await createBillingInvoice(negotiationQuote._id);
 
     return {
@@ -508,10 +526,12 @@ async function advanceApprovedSubscriptionQuote(quote) {
       SubscriptionDetails.deleteMany({
         _id: { $in: subscriptions.map((subscription) => subscription._id) },
       }),
-      Quote.updateOne(
-        { _id: quote._id },
-        { $set: { status: "APPROVED", subscription_details: [] } },
-      ),
+      transitioned
+        ? Quote.updateOne(
+            { _id: quote._id, status: "NEGOTIATION" },
+            { $set: { status: "APPROVED", subscription_details: [] } },
+          )
+        : Promise.resolve(),
     ]);
     throw error;
   }
@@ -794,7 +814,13 @@ export async function createQuotation(req, res) {
       quote_version: 1,
       quote_id: quote._id,
     });
-    workflowResult = await advanceApprovedSubscriptionQuote(quote);
+    workflowResult = {
+      quote,
+      billing: null,
+      reservations: [],
+      subscriptions: [],
+      subscriptionRevisions: [],
+    };
     const createdQuote = await quoteQuery(workflowResult.quote._id);
 
     logger.info("Quotation created", {
@@ -1009,23 +1035,22 @@ export async function updateQuotation(req, res) {
       negotiation_id: currentRevision.negotiation_id,
       quote_id: newQuote._id,
     });
-    workflowResult = await advanceApprovedSubscriptionQuote(newQuote);
-
-    if (
-      currentQuote.status !== "NEGOTIATION" &&
-      workflowResult.quote.status === "NEGOTIATION" &&
-      workflowResult.reservations.length === 0
-    ) {
-      workflowResult.reservations = await reserveQuoteInventory(
-        workflowResult.quote.products,
-      );
-    }
+    workflowResult = {
+      quote: newQuote,
+      billing: null,
+      reservations: [],
+      subscriptions: [],
+      subscriptionRevisions: [],
+    };
 
     if (
       currentQuote.status === "NEGOTIATION" &&
       workflowResult.quote.status !== "NEGOTIATION"
     ) {
-      releasedInventory = await releaseQuoteInventory(currentQuote.products);
+      releasedInventory = await releaseQuoteInventory(
+        currentQuote.products,
+        currentQuote.fulfillment_details,
+      );
     }
 
     const updatedQuote = await quoteQuery(workflowResult.quote._id);
@@ -1127,6 +1152,94 @@ export async function updateQuotation(req, res) {
   }
 }
 
+export async function startQuoteNegotiation(req, res) {
+  requireDatabase();
+  const body = requireObject(req.body);
+  rejectUnknownFields(body, ["quote_id"]);
+
+  const quoteId = body.quote_id;
+  if (!mongoose.isObjectIdOrHexString(quoteId)) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_ID",
+      "quote_id must be a valid MongoDB ObjectId",
+    );
+  }
+
+  const quote = await Quote.findById(quoteId).lean();
+  if (!quote) {
+    throw new ApiError(404, "QUOTE_NOT_FOUND", "Quotation not found");
+  }
+  if (!quote.is_latest_quote) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "Only the latest quotation revision can enter negotiation",
+    );
+  }
+
+  if (quote.status === "NEGOTIATION") {
+    const billing = await createBillingInvoice(quote._id);
+    res.json({
+      quote: await quoteQuery(quote._id),
+      billing: billing.toObject(),
+      created_subscriptions: 0,
+    });
+    return;
+  }
+
+  if (quote.status !== "APPROVED") {
+    throw new ApiError(
+      409,
+      "QUOTE_NOT_READY_FOR_NEGOTIATION",
+      "Only an approved quotation can enter negotiation",
+      { current_status: quote.status },
+    );
+  }
+
+  const physicalProducts = quote.products.filter(
+    (product) => product.category !== "SUBSCRIPTION",
+  );
+  const fulfillmentDetails = quote.fulfillment_details ?? [];
+  const fulfillmentComplete =
+    physicalProducts.every((product) => Boolean(product.store_id)) &&
+    fulfillmentDetails.length === physicalProducts.length;
+
+  if (physicalProducts.length > 0 && !fulfillmentComplete) {
+    throw new ApiError(
+      409,
+      "FULFILLMENT_REQUIRED",
+      "Save a warehouse allocation for every physical product before starting negotiation",
+      {
+        physical_product_count: physicalProducts.length,
+        fulfillment_count: fulfillmentDetails.length,
+      },
+    );
+  }
+
+  const workflowResult = await advanceApprovedQuoteToNegotiation(quote);
+  const negotiationQuote = await quoteQuery(workflowResult.quote._id);
+
+  logger.info("Quotation entered customer negotiation", {
+    "event.name": "quote.negotiation.started",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "quote.id": String(quote._id),
+    "quote.status": negotiationQuote.status,
+    "quote.fulfillment.count": fulfillmentDetails.length,
+    "quote.subscription.count": workflowResult.subscriptions.length,
+    "quote.inventory.reservation.count": workflowResult.reservations.length,
+    "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
+    "billing.invoice.number": workflowResult.billing?.invoice_number ?? null,
+  });
+
+  res.json({
+    quote: negotiationQuote,
+    billing: workflowResult.billing?.toObject() ?? null,
+    created_subscriptions: workflowResult.subscriptions.length,
+  });
+}
+
 export async function confirmCustomerQuote(req, res) {
   requireDatabase();
   const body = requireObject(req.body);
@@ -1203,7 +1316,10 @@ export async function confirmCustomerQuote(req, res) {
       quote = completedQuote;
       transitioned = true;
       try {
-        releasedInventory = await releaseQuoteInventory(quote.products);
+        releasedInventory = await releaseQuoteInventory(
+          quote.products,
+          quote.fulfillment_details,
+        );
       } catch (error) {
         const rollback = await Quote.updateOne(
           {
