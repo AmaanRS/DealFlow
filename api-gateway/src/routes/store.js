@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import { asyncRoute } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
 import { logger, requestLogContext, setRequestAttributes } from '../telemetry.js'
+import { callQuoteService } from './quote.js'
 
 const router = Router()
 const storeServiceUrl = config.get('night_sky_url')
@@ -116,6 +117,53 @@ router.post(
       'Store service request completed',
       requestLogContext(req, {
         'event.name': 'store.service.request.completed',
+        'event.outcome': outcome,
+      }),
+    )
+    res.status(result.status).json(result.data)
+  }),
+)
+
+router.patch(
+  '/manual_store_split',
+  requireRoles(USER_ROLES.ADMIN, USER_ROLES.SALES_REP, USER_ROLES.MANAGER),
+  asyncRoute(async (req, res) => {
+    if (req.auth.user.role === USER_ROLES.SALES_REP) {
+      const current = await callQuoteService(
+        req,
+        `/quote/${encodeURIComponent(req.body?.quote_id ?? '')}`,
+      )
+      if (current.status >= 400) {
+        res.status(current.status).json(current.data)
+        return
+      }
+      if (current.data.quote?.created_by !== req.auth.user.email) {
+        res.status(404).json({
+          code: 'QUOTE_NOT_FOUND',
+          message: 'Quotation not found.',
+        })
+        return
+      }
+    }
+
+    const result = await callStoreService(req, '/store/manual_store_split', {
+      method: 'PATCH',
+      body: req.body,
+    })
+    const outcome = result.status < 400 ? 'success' : 'failure'
+    setRequestAttributes(req, {
+      'event.outcome': outcome,
+      'store.operation': 'manual_split',
+      'store.service.status_code': result.status,
+      'quote.id': req.body?.quote_id ? String(req.body.quote_id) : undefined,
+      'store.assignment.count': Array.isArray(req.body?.stores)
+        ? req.body.stores.length
+        : undefined,
+    })
+    logger.info(
+      'Manual store allocation request completed',
+      requestLogContext(req, {
+        'event.name': 'store.manual_allocation.request.completed',
         'event.outcome': outcome,
       }),
     )
