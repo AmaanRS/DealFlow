@@ -122,7 +122,7 @@ const navigation = [
       },
       {
         to: '/billing',
-        label: 'Billing',
+        label: 'Billing & invoices',
         icon: BadgeIndianRupee,
         roles: [USER_ROLES.FINANCE],
       },
@@ -150,7 +150,7 @@ const routeTitles = {
   quotations: 'Quotations',
   approvals: 'Discount approvals',
   fulfillment: 'Warehouse fulfillment',
-  billing: 'Subscriptions & billing',
+  billing: 'Billing & invoices',
   configuration: 'Back-end configuration',
   admin: 'Access requests',
 }

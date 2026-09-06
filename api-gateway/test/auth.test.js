@@ -3,10 +3,19 @@ import { after, test } from 'node:test'
 import { USER_ROLES, USER_STATUSES } from '@app/models/constants'
 
 await import('../src/config.js')
-const { createRegistrationRequest } = await import('../src/routes/auth.js')
+const { createRegistrationRequest, default: authRoutes } = await import('../src/routes/auth.js')
 const { shutdownObservability } = await import('@app/observability')
 
 after(() => shutdownObservability())
+
+test('password reset request and completion endpoints are registered', () => {
+  const routePaths = authRoutes.stack
+    .map((layer) => layer.route?.path)
+    .flat()
+
+  assert.ok(routePaths.includes('/forgot_password'))
+  assert.ok(routePaths.includes('/reset_password'))
+})
 
 test('registration defaults to CUSTOMER when requestedRole is omitted', async () => {
   let createdUser

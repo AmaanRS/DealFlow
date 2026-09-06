@@ -56,7 +56,6 @@ export default function DashboardPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Deal health"
         title={`Welcome, ${user.fullName.split(' ')[0]}.`}
         description="Review commercial risk, stalled deals and decisions that need your attention."
       />

@@ -27,12 +27,13 @@ export const quoteApi = {
     return request(`${QUOTE_BASE_URL}/pricing_policy`)
   },
 
-  list({ page = 1, limit = 100, status } = {}) {
+  list({ page = 1, limit = 100, status, search } = {}) {
     const query = new URLSearchParams({
       page: String(page),
       limit: String(limit),
     })
     if (status) query.set('status', status)
+    if (search) query.set('search', search)
     return request(`${QUOTE_BASE_URL}/get_quotes?${query}`)
   },
 
@@ -51,6 +52,10 @@ export const quoteApi = {
 
   get(quoteId) {
     return request(`${QUOTE_BASE_URL}/${encodeURIComponent(quoteId)}`)
+  },
+
+  getInvoice(quoteId) {
+    return request(`/v1/api/customer/${encodeURIComponent(quoteId)}/invoice`)
   },
 
   create(payload) {

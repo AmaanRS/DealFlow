@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { createLogger } from "@app/observability";
-import { promoteCustomerTier } from "@app/models/auth";
+import { promoteCustomerTier, User } from "@app/models/auth";
 import { Article, resolveLatestReportingHsns } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
@@ -169,7 +169,13 @@ function parseFilterObject(query) {
     if (query[field] !== undefined) input[field] = query[field];
   }
 
-  const allowedQueryFields = new Set(["filter", "page", "limit", ...FILTER_FIELDS]);
+  const allowedQueryFields = new Set([
+    "filter",
+    "page",
+    "limit",
+    "search",
+    ...FILTER_FIELDS,
+  ]);
   const unknownQueryFields = Object.keys(query).filter(
     (field) => !allowedQueryFields.has(field),
   );
@@ -217,6 +223,59 @@ function parseFilterObject(query) {
 
   if (filter.is_latest_quote === undefined) filter.is_latest_quote = true;
   return filter;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Free-text term for the quote list. Returns null when absent so "not asked
+ * for" stays distinct from "matched nothing".
+ */
+function parseQuoteSearch(query) {
+  if (query.search === undefined || query.search === "") return null;
+  if (Array.isArray(query.search)) {
+    throw new ApiError(400, "INVALID_SEARCH", "search must be a single value");
+  }
+
+  const search = String(query.search).trim();
+  if (!search) return null;
+  if (search.length > 100) {
+    throw new ApiError(
+      400,
+      "INVALID_SEARCH",
+      "search must contain at most 100 characters",
+    );
+  }
+
+  return search;
+}
+
+/**
+ * Widen a quote filter with a free-text term.
+ *
+ * A quotation stores only the customer's id, so searching by customer name
+ * means resolving matching users first. The rep's own address is stored on the
+ * quote, so `created_by` is matched directly. An unmatched customer name still
+ * has to return zero rows rather than everything, which is why the customer
+ * clause is added even when the id list is empty.
+ */
+async function withQuoteSearch(filter, search) {
+  const pattern = { $regex: escapeRegex(search), $options: "i" };
+  const customers = await User.find({
+    $or: [{ fullName: pattern }, { emailLower: pattern }],
+  })
+    .select("_id")
+    .lean();
+
+  return {
+    ...filter,
+    $or: [
+      { created_by: pattern },
+      { customer: { $in: customers.map((customer) => String(customer._id)) } },
+    ],
+  };
 }
 
 async function releaseInventoryReservations(reservations) {
@@ -551,10 +610,13 @@ async function revisionForQuote(quoteId) {
   return QuoteRevisionHistory.findOne({ quote_id: quoteId }).lean();
 }
 
-async function sendQuoteList(res, filter, pagination) {
+async function sendQuoteList(res, filter, pagination, search = null) {
   const { page, limit } = pagination;
+  const effectiveFilter = search
+    ? await withQuoteSearch(filter, search)
+    : filter;
   const [quotes, total] = await Promise.all([
-    Quote.find(filter)
+    Quote.find(effectiveFilter)
       .sort({ updatedAt: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -563,7 +625,7 @@ async function sendQuoteList(res, filter, pagination) {
         select: "fullName email _custom_json.tier _custom_json.total_price",
       })
       .lean(),
-    Quote.countDocuments(filter),
+    Quote.countDocuments(effectiveFilter),
   ]);
   const currentQuotes = await useLatestQuoteReportingHsns(quotes);
   const revisions = await QuoteRevisionHistory.find({
@@ -593,7 +655,8 @@ export async function getQuotes(req, res) {
   requireDatabase();
   const pagination = parsePagination(req.query);
   const filter = parseFilterObject(req.query);
-  await sendQuoteList(res, filter, pagination);
+  const search = parseQuoteSearch(req.query);
+  await sendQuoteList(res, filter, pagination, search);
 }
 
 export async function getApprovedQuotes(req, res) {
@@ -602,7 +665,7 @@ export async function getApprovedQuotes(req, res) {
   const filter = parseFilterObject(req.query);
   filter.status = "APPROVED";
   filter.is_latest_quote = true;
-  await sendQuoteList(res, filter, pagination);
+  await sendQuoteList(res, filter, pagination, parseQuoteSearch(req.query));
 }
 
 export async function getAtRiskDeals(req, res) {
@@ -638,7 +701,7 @@ export async function getAtRiskDeals(req, res) {
   }
 
   filter.is_latest_quote = true;
-  await sendQuoteList(res, filter, pagination);
+  await sendQuoteList(res, filter, pagination, parseQuoteSearch(req.query));
 }
 
 export async function getQuote(req, res) {

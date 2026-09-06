@@ -64,6 +64,7 @@ The canonical API base path is `/v1/api`.
 - `POST /v1/api/user/auth/signup`
 - `POST /v1/api/user/auth/login`
 - `POST /v1/api/user/auth/forgot_password`
+- `POST /v1/api/user/auth/reset_password`
 - `GET /v1/api/user/auth/me`
 - `POST /v1/api/user/auth/logout`
 - `POST /v1/api/admin/create_tier_discount` - admin or manager
@@ -114,10 +115,19 @@ category discounts with:
 ```
 
 Hardware and service discounts must be non-negative. Subscription discounts are
-fixed at zero, matching the Night Sky model. The forgot-password endpoint always
-returns the same accepted response to prevent account discovery and records an
-audit event for known users. Email delivery and the reset-confirmation endpoint
-still need to be connected before password reset is end-to-end complete.
+fixed at zero, matching the Night Sky model.
+
+The forgot-password endpoint creates a random, 15-minute, one-time token, stores
+only its HMAC hash in `password_reset_tokens`, and sends the raw token inside a
+frontend reset link through Nodemailer. It returns the same accepted response for
+known and unknown addresses to prevent account discovery. Submitting the new
+password to `reset_password` consumes the token, hashes the password with bcrypt,
+and revokes every active internal session for that user.
+
+Configure Gmail SMTP in `api-gateway/.env` with `MAIL_HOST`, `MAIL_PORT`,
+`MAIL_SECURE`, `MAIL_USER`, `MAIL_APP_PASSWORD`, and `MAIL_FROM`. Use a Google App
+Password for `MAIL_APP_PASSWORD`; never place the normal Google account password
+there. The complete example is in `api-gateway/.env.example`.
 
 ## Customer portal
 

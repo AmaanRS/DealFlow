@@ -7,6 +7,8 @@ import { BOARD_COLUMNS, MOVABLE_STAGES } from '../quoteStages.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, StatusBadge } from '../components/Ui.jsx'
 
+const SEARCH_DEBOUNCE_MS = 350
+
 /** Sentinel that asks for the next page once it scrolls into view. */
 function InfiniteScrollSentinel({ onReach, active, busy }) {
   const ref = useRef(null)
@@ -45,23 +47,31 @@ export default function QuotationsPage() {
     hasMoreQuotes,
     loadMoreQuotes,
     refreshQuotes,
+    quotesSearch,
+    setQuotesSearch,
   } = useWorkspace()
   const navigate = useNavigate()
   const [view, setView] = useState('board')
-  const [query, setQuery] = useState('')
+  const [draftQuery, setDraftQuery] = useState(quotesSearch)
   const [dragging, setDragging] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    const savedQuotes = quotes.filter((quote) => !quote.isUnsaved)
-    if (!needle) return savedQuotes
-    return savedQuotes.filter((quote) =>
-      quote.id.toLowerCase().includes(needle) ||
-      quote.customer.name.toLowerCase().includes(needle) ||
-      quote.rep.toLowerCase().includes(needle),
+  // The API already applied the search term, so nothing is filtered again here.
+  // Only the unsaved local draft is held back, since it has no server id yet.
+  const filtered = useMemo(
+    () => quotes.filter((quote) => !quote.isUnsaved),
+    [quotes],
+  )
+
+  // Debounced so a request is not fired on every keystroke.
+  useEffect(() => {
+    if (draftQuery.trim() === quotesSearch) return undefined
+    const timer = window.setTimeout(
+      () => setQuotesSearch(draftQuery.trim()),
+      SEARCH_DEBOUNCE_MS,
     )
-  }, [query, quotes])
+    return () => window.clearTimeout(timer)
+  }, [draftQuery, quotesSearch, setQuotesSearch])
 
   const openQuote = useCallback((quoteId) => navigate(`/quotations/${quoteId}`), [navigate])
 
@@ -122,6 +132,23 @@ export default function QuotationsPage() {
         title="Quotations"
         description="Every quotation in the system. Drag a card between Draft and Pending Approval, or select one to open it."
       />
+
+      <section className="list-toolbar">
+        <label className="filter-search">
+          <Search size={16} />
+          <input
+            type="search"
+            value={draftQuery}
+            onChange={(event) => setDraftQuery(event.target.value)}
+            placeholder="Search by customer or owner"
+          />
+        </label>
+        {quotesSearch && !quotesLoading && (
+          <small className="list-toolbar__note">
+            Showing matches for “{quotesSearch}”
+          </small>
+        )}
+      </section>
 
       {unavailable ? (
         <section className="data-table-wrap">
@@ -201,24 +228,13 @@ export default function QuotationsPage() {
           </section>
 
           <InfiniteScrollSentinel
-            active={hasMoreQuotes && !query}
+            active={hasMoreQuotes}
             busy={quotesLoadingMore}
             onReach={loadMoreQuotes}
           />
         </>
       ) : (
         <>
-          <section className="list-toolbar">
-            <label className="filter-search">
-              <Search size={16} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search customer, quote or owner"
-              />
-            </label>
-          </section>
-
           <section className="data-table-wrap">
             <table className="data-table">
               <thead>
@@ -248,7 +264,7 @@ export default function QuotationsPage() {
           </section>
 
           <InfiniteScrollSentinel
-            active={hasMoreQuotes && !query}
+            active={hasMoreQuotes}
             busy={quotesLoadingMore}
             onReach={loadMoreQuotes}
           />

@@ -129,6 +129,8 @@ function toWorkspaceQuote(quote) {
         unit: 'Unit',
         tax: product.gst,
         stock: null,
+        recurring: product.category === 'SUBSCRIPTION',
+        plan: product.category === 'SUBSCRIPTION' ? 'Recurring' : null,
         discountLimit: Number(product.product_discount) || 0,
         categoryDiscount: Number(product.category_discount) || 0,
         description: `HSN ${product.hsn}`,
@@ -172,13 +174,20 @@ export function WorkspaceProvider({ children, user }) {
   const [quotesPage, setQuotesPage] = useState(1)
   const [quotesTotalPages, setQuotesTotalPages] = useState(1)
   const [quotesLoadingMore, setQuotesLoadingMore] = useState(false)
+  // Held here rather than in the page so paging and searching share one
+  // request path: a new term resets to page one and the sentinel keeps working.
+  const [quotesSearch, setQuotesSearch] = useState('')
   const hasMoreQuotes = quotesPage < quotesTotalPages
 
   const refreshQuotes = useCallback(async () => {
     setQuotesLoading(true)
     setQuotesError(null)
     try {
-      const result = await quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
+      const result = await quoteApi.list({
+        page: 1,
+        limit: QUOTES_PAGE_SIZE,
+        search: quotesSearch || undefined,
+      })
       setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote)))
       setQuotesPage(result.pagination?.page ?? 1)
       setQuotesTotalPages(result.pagination?.total_pages ?? 1)
@@ -188,7 +197,7 @@ export function WorkspaceProvider({ children, user }) {
     } finally {
       setQuotesLoading(false)
     }
-  }, [])
+  }, [quotesSearch])
 
   /**
    * Append the next page. Locally created drafts have no server id yet, so they
@@ -202,7 +211,11 @@ export function WorkspaceProvider({ children, user }) {
     setQuotesLoadingMore(true)
     try {
       const nextPage = quotesPage + 1
-      const result = await quoteApi.list({ page: nextPage, limit: QUOTES_PAGE_SIZE })
+      const result = await quoteApi.list({
+        page: nextPage,
+        limit: QUOTES_PAGE_SIZE,
+        search: quotesSearch || undefined,
+      })
       const incoming = (result.quotes ?? []).map((quote) => toWorkspaceQuote(quote))
       setQuotes((current) => {
         const seen = new Set(current.map((quote) => quote.id))
@@ -215,14 +228,24 @@ export function WorkspaceProvider({ children, user }) {
     } finally {
       setQuotesLoadingMore(false)
     }
-  }, [quotesLoading, quotesLoadingMore, quotesPage, quotesTotalPages])
+  }, [quotesLoading, quotesLoadingMore, quotesPage, quotesSearch, quotesTotalPages])
 
   useEffect(() => {
     let active = true
 
-    quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
+    Promise.resolve()
+      .then(() => {
+        if (!active) return null
+        setQuotesLoading(true)
+        setQuotesError(null)
+        return quoteApi.list({
+          page: 1,
+          limit: QUOTES_PAGE_SIZE,
+          search: quotesSearch || undefined,
+        })
+      })
       .then((result) => {
-        if (!active) return
+        if (!active || !result) return
         setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote)))
         setQuotesPage(result.pagination?.page ?? 1)
         setQuotesTotalPages(result.pagination?.total_pages ?? 1)
@@ -237,7 +260,7 @@ export function WorkspaceProvider({ children, user }) {
     return () => {
       active = false
     }
-  }, [])
+  }, [quotesSearch])
 
   function commit(nextQuotes) {
     setQuotes(nextQuotes)
@@ -427,6 +450,8 @@ export function WorkspaceProvider({ children, user }) {
     quotesLoading,
     quotesError,
     quotesLoadingMore,
+    quotesSearch,
+    setQuotesSearch,
     hasMoreQuotes,
     loadMoreQuotes,
     refreshQuotes,

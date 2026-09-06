@@ -2,6 +2,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Minus,
   PackagePlus,
   Plus,
@@ -19,6 +21,12 @@ import { quoteApi } from '../../api/quoteApi.js'
 import { calculateQuote, formatMoney, formatPercentage } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { Panel, StatusBadge } from '../components/Ui.jsx'
+
+const CATALOGUE_PAGE_SIZE = 8
+const SEARCH_DEBOUNCE_MS = 350
+// Subscriptions are not added as quotation lines from this picker.
+const CATALOGUE_CATEGORIES = 'HARDWARE,SERVICES'
+const CATEGORY_CODES = { Hardware: 'HARDWARE', Services: 'SERVICES' }
 
 function WorkflowSteps({ stage }) {
   const stages = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'FULFILLMENT']
@@ -127,8 +135,15 @@ export default function QuotationBuilderPage() {
   } = useWorkspace()
   const quote = quotes.find((item) => item.id === quoteId)
   const editable = Boolean(quote && (quote.isUnsaved || quote.stage === 'DRAFT'))
+  const [draftQuery, setDraftQuery] = useState('')
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All')
+  const [cataloguePage, setCataloguePage] = useState(1)
+  const [cataloguePagination, setCataloguePagination] = useState({
+    page: 1,
+    total: 0,
+    totalPages: 1,
+  })
   const [customers, setCustomers] = useState([])
   const [catalogueProducts, setCatalogueProducts] = useState([])
   const [pricingPolicy, setPricingPolicy] = useState(null)
@@ -144,23 +159,50 @@ export default function QuotationBuilderPage() {
     if (!editable) return undefined
     let active = true
 
+    Promise.all([customerApi.list(), quoteApi.getPricingPolicy()])
+      .then(([customerResult, policyResult]) => {
+        if (!active) return
+        setCustomers(customerResult.customers ?? [])
+        setPricingPolicy(policyResult)
+      })
+      .catch((error) => {
+        if (active) setCatalogueError(error)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [editable])
+
+  /**
+   * The catalogue is paged and searched on the server. Fetching everything and
+   * filtering locally only worked while the catalogue was small: past one page
+   * the rep would silently stop seeing products that exist.
+   */
+  useEffect(() => {
+    if (!editable) return undefined
+    let active = true
+
     Promise.resolve()
       .then(() => {
         if (!active) return null
         setCatalogueLoading(true)
         setCatalogueError(null)
-        return Promise.all([
-          customerApi.list(),
-          productApi.list(),
-          quoteApi.getPricingPolicy(),
-        ])
+        return productApi.list({
+          page: cataloguePage,
+          limit: CATALOGUE_PAGE_SIZE,
+          category: category === 'All' ? CATALOGUE_CATEGORIES : CATEGORY_CODES[category],
+          search: query || undefined,
+        })
       })
-      .then((results) => {
-        if (!active || !results) return
-        const [customerResult, productResult, policyResult] = results
-        setCustomers(customerResult.customers ?? [])
-        setCatalogueProducts(productResult.products ?? [])
-        setPricingPolicy(policyResult)
+      .then((result) => {
+        if (!active || !result) return
+        setCatalogueProducts(result.products ?? [])
+        setCataloguePagination({
+          page: result.pagination?.page ?? cataloguePage,
+          total: result.pagination?.total ?? 0,
+          totalPages: Math.max(1, result.pagination?.total_pages ?? 1),
+        })
       })
       .catch((error) => {
         if (active) setCatalogueError(error)
@@ -172,7 +214,17 @@ export default function QuotationBuilderPage() {
     return () => {
       active = false
     }
-  }, [editable])
+  }, [cataloguePage, category, editable, query])
+
+  // Debounced, and a new term restarts paging.
+  useEffect(() => {
+    if (draftQuery.trim() === query) return undefined
+    const timer = window.setTimeout(() => {
+      setCataloguePage(1)
+      setQuery(draftQuery.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [draftQuery, query])
 
   const calculation = useMemo(
     () => {
@@ -187,17 +239,17 @@ export default function QuotationBuilderPage() {
   // Fixed tabs rather than tabs derived from the fetched page: a rep needs to
   // see that Services exists and is empty, not have the tab silently vanish.
   const catalogueCategories = ['All', 'Hardware', 'Services']
-  const filteredProducts = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return catalogueProducts.filter((product) => {
-      const matchesCategory = category === 'All' || product.category === category
-      const matchesQuery =
-        !needle ||
-        product.name.toLowerCase().includes(needle) ||
-        product.sku.toLowerCase().includes(needle)
-      return matchesCategory && matchesQuery
-    })
-  }, [catalogueProducts, category, query])
+
+  function changeCataloguePage(nextPage) {
+    if (nextPage < 1 || nextPage > cataloguePagination.totalPages) return
+    setCataloguePage(nextPage)
+  }
+
+  function changeCategory(next) {
+    if (next === category) return
+    setCataloguePage(1)
+    setCategory(next)
+  }
 
   if (!quote || !calculation) {
     return (
@@ -311,36 +363,74 @@ export default function QuotationBuilderPage() {
       {editable && (
         <Panel title="Add products" description="Search the live catalogue, then add items to the quotation below.">
           <div className="catalogue-toolbar catalogue-toolbar--compact">
-            <label className="filter-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search product or SKU" /></label>
+            <label className="filter-search">
+              <Search size={15} />
+              <input
+                type="search"
+                value={draftQuery}
+                onChange={(event) => setDraftQuery(event.target.value)}
+                placeholder="Search product or SKU"
+              />
+            </label>
             <div className="category-tabs">
               {catalogueCategories.map((item) => (
-                <button type="button" className={category === item ? 'active' : ''} onClick={() => setCategory(item)} key={item}>{item}</button>
+                <button type="button" className={category === item ? 'active' : ''} onClick={() => changeCategory(item)} key={item}>{item}</button>
               ))}
             </div>
           </div>
           {catalogueLoading ? (
-            <p className="empty-copy">Loading customers, products and pricing policy…</p>
+            <p className="empty-copy">Loading catalogue…</p>
           ) : catalogueError ? (
             <div className="inline-error">{catalogueError.message}</div>
           ) : (
-            <div className="catalogue-compact-list">
-              {filteredProducts.map((product) => (
-                <article key={product.id}>
-                  <div><strong>{product.name}</strong><small>{product.sku} · {product.category} · {product.stock} available</small></div>
-                  <strong>{formatMoney(product.price)}</strong>
-                  <button type="button" onClick={() => addProduct(quote.id, product)} disabled={product.stock === 0 && !product.recurring}>
-                    <Plus size={14} /> Add
+            <>
+              <div className="catalogue-compact-list">
+                {catalogueProducts.map((product) => (
+                  <article key={product.id}>
+                    <div><strong>{product.name}</strong><small>{product.sku} · {product.category} · {product.stock} available</small></div>
+                    <strong>{formatMoney(product.price)}</strong>
+                    <button type="button" onClick={() => addProduct(quote.id, product)} disabled={product.stock === 0 && !product.recurring}>
+                      <Plus size={14} /> Add
+                    </button>
+                  </article>
+                ))}
+                {!catalogueProducts.length && (
+                  <p className="empty-copy">
+                    {query
+                      ? `Nothing matches “${query}”. The search covers product names and SKUs.`
+                      : category === 'All'
+                        ? 'No products in the catalogue yet.'
+                        : `No ${category.toLowerCase()} products in the catalogue yet.`}
+                  </p>
+                )}
+              </div>
+
+              {cataloguePagination.totalPages > 1 && (
+                <footer className="catalogue-pagination">
+                  <button
+                    className="button button--quiet button--small"
+                    type="button"
+                    onClick={() => changeCataloguePage(cataloguePage - 1)}
+                    disabled={cataloguePage <= 1}
+                  >
+                    <ChevronLeft size={14} /> Previous
                   </button>
-                </article>
-              ))}
-              {!filteredProducts.length && (
-                <p className="empty-copy">
-                  {category === 'All'
-                    ? 'No products match this search.'
-                    : `No ${category.toLowerCase()} products match this search.`}
-                </p>
+                  <small>
+                    Page {cataloguePagination.page} of {cataloguePagination.totalPages}
+                    {' · '}
+                    {cataloguePagination.total} product{cataloguePagination.total === 1 ? '' : 's'}
+                  </small>
+                  <button
+                    className="button button--quiet button--small"
+                    type="button"
+                    onClick={() => changeCataloguePage(cataloguePage + 1)}
+                    disabled={cataloguePage >= cataloguePagination.totalPages}
+                  >
+                    Next <ChevronRight size={14} />
+                  </button>
+                </footer>
               )}
-            </div>
+            </>
           )}
         </Panel>
       )}

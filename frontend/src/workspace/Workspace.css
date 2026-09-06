@@ -837,6 +837,48 @@
 .control-action small { margin-top: 3px; color: var(--ws-muted); font-size: 7px; }
 .control-action--danger { color: #ffabb6; }
 
+.workspace-loading--panel { min-height: 180px; }
+.invoice-header__amount { align-items: flex-end; text-align: right; }
+.invoice-preview { width: 100%; min-height: 620px; margin-top: 14px; border: 1px solid var(--ws-line); border-radius: 10px; background: #fff; }
+.billing-inline-error { display: flex; align-items: center; gap: 10px; padding: 13px 15px; border: 1px solid rgba(255, 116, 133, 0.3); border-radius: 10px; color: var(--ws-red); background: rgba(255, 116, 133, 0.08); }
+.billing-inline-error > span { display: flex; flex-direction: column; }
+.billing-inline-error strong { font-size: 13px; }
+.billing-inline-error small { margin-top: 3px; color: var(--ws-soft); font-size: 11px; }
+.billing-empty-state { display: flex; min-height: 360px; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.billing-empty-state > svg { margin-bottom: 12px; color: var(--ws-blue); }
+.billing-empty-state h2 { margin: 0; font-size: 20px; }
+.billing-empty-state p { max-width: 570px; margin: 8px 0 0; color: var(--ws-muted); font-size: 13px; line-height: 1.6; }
+.billing-lifecycle { display: flex; align-items: center; gap: 10px; margin-top: 22px; color: var(--ws-soft); font-size: 11px; font-weight: 750; }
+.billing-lifecycle span { padding: 8px 10px; border: 1px solid var(--ws-line); border-radius: 8px; background: var(--ws-panel-soft); }
+.billing-lifecycle i { width: 28px; height: 1px; background: var(--ws-line-strong); }
+.billing-summary-list { margin: 0; }
+.billing-summary-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(158, 181, 216, 0.1); }
+.billing-summary-list > div:last-child { border-bottom: 0; }
+.billing-summary-list dt { color: var(--ws-muted); font-size: 11px; }
+.billing-summary-list dd { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--ws-text); font-size: 12px; font-weight: 750; text-align: right; }
+.billing-summary-list dd svg { color: var(--ws-green); }
+.billing-event-list { display: flex; flex-direction: column; gap: 10px; }
+.billing-event-list > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--ws-line); border-radius: 9px; }
+.billing-event-list > span > svg { color: var(--ws-green); }
+.billing-event-list > span > span { display: flex; min-width: 0; flex-direction: column; }
+.billing-event-list strong { font-size: 12px; }
+.billing-event-list small { margin-top: 3px; overflow: hidden; color: var(--ws-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Keep invoice information readable instead of inheriting the older compact dashboard scale. */
+.billing-hero p { font-size: 12px; }
+.billing-hero > div:last-child small { font-size: 10px; }
+.billing-hero > div:last-child strong { font-size: 15px; }
+.invoice-header strong { font-size: 13px; }
+.invoice-header small,
+.invoice-footer small,
+.subscription-card small,
+.billing-lines small { font-size: 10px; }
+.invoice-footer strong,
+.subscription-card > div strong,
+.billing-lines strong { font-size: 12px; }
+.subscription-card p { font-size: 11px; }
+.subscription-card > strong { font-size: 13px; }
+
 .configuration-tabs { display: flex; gap: 4px; padding: 5px; border: 1px solid var(--ws-line); border-radius: 11px; overflow-x: auto; background: rgba(15, 24, 40, 0.7); }
 .configuration-tabs button { display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--ws-muted); background: transparent; font-size: 8px; font-weight: 700; white-space: nowrap; }
 .configuration-tabs button.active { color: #dce9ff; background: rgba(79, 141, 253, 0.11); }
@@ -1379,6 +1421,9 @@
   .subscription-card > strong { grid-column: 2; text-align: left; }
   .billing-schedule article { grid-template-columns: auto minmax(0, 1fr) auto; }
   .billing-schedule .status-badge { grid-column: 2; }
+  .invoice-preview { min-height: 480px; }
+  .billing-lifecycle { flex-direction: column; }
+  .billing-lifecycle i { width: 1px; height: 18px; }
   .configuration-summary { grid-template-columns: 1fr; }
   .discount-policy-intro { grid-template-columns: 1fr; padding: 16px; }
   .discount-policy-intro__icon { width: 40px; height: 40px; }
@@ -1516,3 +1561,17 @@
   background: color-mix(in srgb, var(--ws-line-strong) 45%, transparent);
 }
 .configuration-search__clear:hover { color: var(--ws-text); }
+
+/* Paging controls under the quotation builder's catalogue picker. */
+.catalogue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ws-line);
+}
+.catalogue-pagination small { color: var(--ws-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.list-toolbar__note { color: var(--ws-muted); font-size: 10px; }
