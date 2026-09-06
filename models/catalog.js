@@ -1,6 +1,10 @@
 import mongoose from 'mongoose'
 import { ITEM_CATEGORIES } from './constants.js'
-import { CategoryDiscount, TierDiscount } from './discounts.js'
+import {
+  CategoryDiscount,
+  TierDiscount,
+  ensureDefaultDiscountPolicies,
+} from './discounts.js'
 
 const { Schema } = mongoose
 
@@ -419,6 +423,7 @@ async function migrateArticleIndexes() {
 export async function initializeCollections() {
   await migrateArticleIndexes()
   await Promise.all(catalogModels.map((model) => model.init()))
+  await ensureDefaultDiscountPolicies()
   return catalogModels.map((model) => model.collection.collectionName)
 }
 

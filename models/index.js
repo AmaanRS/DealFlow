@@ -8,7 +8,12 @@ export {
   USER_ROLES,
   USER_STATUSES,
 } from './constants.js'
-export { CategoryDiscount, TierDiscount } from './discounts.js'
+export {
+  DEFAULT_CUSTOMER_TIERS,
+  CategoryDiscount,
+  TierDiscount,
+  ensureDefaultDiscountPolicies,
+} from './discounts.js'
 export {
   DEFAULT_HIGH_RISK_THRESHOLD,
   DEFAULT_MEDIUM_RISK_THRESHOLD,

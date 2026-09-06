@@ -7,6 +7,7 @@ import {
   AuditEvent,
   Billing,
   CategoryDiscount,
+  DEFAULT_CUSTOMER_TIERS,
   Hsn,
   Item,
   PortalInvitation,
@@ -30,13 +31,18 @@ import {
 } from '../../night_sky/models.js'
 
 test('TierDiscount validates and normalizes its persisted values', async () => {
-  const validDiscount = new TierDiscount({ tier: '  GOLD  ', discount: 12 })
+  const validDiscount = new TierDiscount({ tier: '  gold  ', discount: 12 })
 
   await validDiscount.validate()
 
   assert.equal(validDiscount.tier, 'GOLD')
   assert.equal(validDiscount.discount, 12)
   assert.equal(TierDiscount.schema.path('tier').options.unique, true)
+  assert.deepEqual(DEFAULT_CUSTOMER_TIERS, [
+    { tier: 'BRONZE', discount: 0 },
+    { tier: 'SILVER', discount: 0 },
+    { tier: 'GOLD', discount: 0 },
+  ])
 
   await assert.rejects(
     new TierDiscount({ tier: '   ', discount: 0 }).validate(),

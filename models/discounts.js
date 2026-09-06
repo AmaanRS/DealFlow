@@ -1,5 +1,11 @@
 import mongoose from 'mongoose'
 
+export const DEFAULT_CUSTOMER_TIERS = Object.freeze([
+  Object.freeze({ tier: 'BRONZE', discount: 0 }),
+  Object.freeze({ tier: 'SILVER', discount: 0 }),
+  Object.freeze({ tier: 'GOLD', discount: 0 }),
+])
+
 function nonNegativeNumber(defaultValue = 0) {
   return {
     type: Number,
@@ -47,6 +53,7 @@ const tierDiscountSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      uppercase: true,
       maxlength: 100,
       unique: true,
     },
@@ -77,3 +84,27 @@ export const CategoryDiscount =
 export const TierDiscount =
   mongoose.models.TierDiscount ??
   mongoose.model('TierDiscount', tierDiscountSchema)
+
+export async function ensureDefaultDiscountPolicies() {
+  await Promise.all(
+    DEFAULT_CUSTOMER_TIERS.map(({ tier, discount }) =>
+      TierDiscount.updateOne(
+        { tier },
+        { $setOnInsert: { tier, discount } },
+        { upsert: true, runValidators: true },
+      ),
+    ),
+  )
+
+  await CategoryDiscount.updateOne(
+    { subscription: 0 },
+    {
+      $setOnInsert: {
+        hardware: 0,
+        service: 0,
+        subscription: 0,
+      },
+    },
+    { upsert: true, runValidators: true },
+  )
+}
