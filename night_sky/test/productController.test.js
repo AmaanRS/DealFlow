@@ -23,6 +23,20 @@ test("product search escapes regular-expression characters", () => {
   assert.equal(result.filter.name.$options, "i");
 });
 
+test("product list accepts multiple categories for one paginated catalogue", () => {
+  const result = parseProductListQuery({
+    page: "3",
+    limit: "8",
+    category: "hardware,services",
+  });
+
+  assert.deepEqual(result, {
+    filter: { categories: { $in: ["HARDWARE", "SERVICES"] } },
+    page: 3,
+    limit: 8,
+  });
+});
+
 test("product list rejects unsupported categories", () => {
   assert.throws(
     () => parseProductListQuery({ category: "food" }),

@@ -146,7 +146,7 @@ async function findActiveManager() {
     .lean()
 }
 
-function sendUpstreamResponse(req, res, result, operation) {
+export function sendUpstreamResponse(req, res, result, operation) {
   const outcome = result.status < 400 ? 'success' : 'failure'
   setRequestAttributes(req, {
     'event.outcome': outcome,
@@ -164,6 +164,45 @@ function sendUpstreamResponse(req, res, result, operation) {
     }),
   )
   res.status(result.status).json(result.data)
+}
+
+/**
+ * Confirm the caller is allowed to touch this quotation before letting a
+ * downstream service act on it. A sales rep is scoped to their own quotations
+ * and gets a 404 rather than a 403 for anyone else's, so the endpoint cannot be
+ * used to probe which quote ids exist. Responds and returns false when denied.
+ */
+async function assertQuoteVisible(req, res, quoteId) {
+  const current = await callQuoteService(
+    req,
+    `/quote/${encodeURIComponent(quoteId)}`,
+  )
+
+  if (current.status >= 400) {
+    setRequestAttributes(req, {
+      'event.outcome': 'failure',
+      'error.code': current.data.code,
+    })
+    res.status(current.status).json(current.data)
+    return false
+  }
+
+  if (
+    req.auth.user.role === USER_ROLES.SALES_REP &&
+    current.data.quote?.created_by !== req.auth.user.email
+  ) {
+    setRequestAttributes(req, {
+      'event.outcome': 'failure',
+      'error.code': 'QUOTE_NOT_FOUND',
+    })
+    res.status(404).json({
+      code: 'QUOTE_NOT_FOUND',
+      message: 'Quotation not found.',
+    })
+    return false
+  }
+
+  return current.data.quote
 }
 
 router.use(asyncRoute(requireInternalAuth))
@@ -360,5 +399,5 @@ router.get(
   }),
 )
 
-export { appendQuery, callQuoteService }
+export { appendQuery, assertQuoteVisible, callQuoteService }
 export default router

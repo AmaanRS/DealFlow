@@ -8,7 +8,6 @@ import {
   Save,
   Search,
   Send,
-  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -60,18 +59,58 @@ function approvalCopy(calculation) {
   }
 }
 
-function recommendationGroups(products, selectedArticleIds, selectedCategories) {
-  const available = products.filter(
-    (product) => !selectedArticleIds.has(product.articleId),
+function boundedPercentage(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 0
+  return Math.min(100, Math.max(0, Math.round(number * 100) / 100))
+}
+
+function PercentageControl({ value, onChange, label, compact = false, tone = 'default' }) {
+  const normalizedValue = boundedPercentage(value)
+  const [draft, setDraft] = useState(String(normalizedValue))
+
+  function commit(nextValue) {
+    const next = boundedPercentage(nextValue === '' ? 0 : nextValue)
+    setDraft(String(next))
+    onChange(next)
+  }
+
+  function handleChange(event) {
+    const nextDraft = event.target.value
+    setDraft(nextDraft)
+    if (nextDraft === '') return
+
+    const number = Number(nextDraft)
+    if (!Number.isFinite(number)) return
+    const next = boundedPercentage(number)
+    if (next !== number) setDraft(String(next))
+    onChange(next)
+  }
+
+  return (
+    <div className={`percentage-control percentage-control--${tone}${compact ? ' percentage-control--compact' : ''}`}>
+      <button type="button" onClick={() => commit(normalizedValue - 1)} disabled={normalizedValue <= 0} aria-label={`Decrease ${label}`}><Minus size={12} /></button>
+      <label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.5"
+          inputMode="decimal"
+          value={draft}
+          onChange={handleChange}
+          onBlur={() => commit(draft)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+          onWheel={(event) => event.currentTarget.blur()}
+          aria-label={label}
+        />
+        <span>%</span>
+      </label>
+      <button type="button" onClick={() => commit(normalizedValue + 1)} disabled={normalizedValue >= 100} aria-label={`Increase ${label}`}><Plus size={12} /></button>
+    </div>
   )
-  const upsell = available
-    .filter((product) => selectedCategories.has(product.categoryCode))
-    .slice(0, 2)
-  const upsellIds = new Set(upsell.map((product) => product.articleId))
-  const crossSell = available
-    .filter((product) => !upsellIds.has(product.articleId))
-    .slice(0, 2)
-  return { upsell, crossSell }
 }
 
 export default function QuotationBuilderPage() {
@@ -96,6 +135,10 @@ export default function QuotationBuilderPage() {
   const [catalogueLoading, setCatalogueLoading] = useState(editable)
   const [catalogueError, setCatalogueError] = useState(null)
   const [saving, setSaving] = useState(null)
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [quoteId])
 
   useEffect(() => {
     if (!editable) return undefined
@@ -141,10 +184,9 @@ export default function QuotationBuilderPage() {
     },
     [editable, pricingPolicy, quote],
   )
-  const catalogueCategories = useMemo(
-    () => ['All', ...new Set(catalogueProducts.map((product) => product.category))],
-    [catalogueProducts],
-  )
+  // Fixed tabs rather than tabs derived from the fetched page: a rep needs to
+  // see that Services exists and is empty, not have the tab silently vanish.
+  const catalogueCategories = ['All', 'Hardware', 'Services']
   const filteredProducts = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return catalogueProducts.filter((product) => {
@@ -156,22 +198,6 @@ export default function QuotationBuilderPage() {
       return matchesCategory && matchesQuery
     })
   }, [catalogueProducts, category, query])
-  const selectedArticleIds = useMemo(
-    () => new Set(quote?.lines.map((line) => line.product.articleId) ?? []),
-    [quote?.lines],
-  )
-  const selectedCategories = useMemo(
-    () => new Set(quote?.lines.map((line) => line.product.categoryCode) ?? []),
-    [quote?.lines],
-  )
-  const suggestions = useMemo(
-    () => recommendationGroups(
-      catalogueProducts,
-      selectedArticleIds,
-      selectedCategories,
-    ),
-    [catalogueProducts, selectedArticleIds, selectedCategories],
-  )
 
   if (!quote || !calculation) {
     return (
@@ -237,21 +263,6 @@ export default function QuotationBuilderPage() {
     }
   }
 
-  function renderSuggestion(product) {
-    return (
-      <article className="quote-suggestion" key={product.id}>
-        <span><Sparkles size={16} /></span>
-        <div>
-          <strong>{product.name}</strong>
-          <small>{product.category} · {formatMoney(product.price)}</small>
-        </div>
-        <button type="button" onClick={() => addProduct(quote.id, product)}>
-          <Plus size={14} /> Add
-        </button>
-      </article>
-    )
-  }
-
   return (
     <div className="page-stack quote-builder-page">
       <header className="quote-builder-header">
@@ -292,7 +303,7 @@ export default function QuotationBuilderPage() {
           <input type="email" value={quote.customer.email} placeholder="Assigned from customer" disabled />
         </label>
         <label>
-          <span>Price list / tier</span>
+          <span>Customer tier</span>
           <input value={quote.customer.tier} placeholder="Assigned automatically" disabled />
         </label>
       </section>
@@ -313,7 +324,7 @@ export default function QuotationBuilderPage() {
             <div className="inline-error">{catalogueError.message}</div>
           ) : (
             <div className="catalogue-compact-list">
-              {filteredProducts.slice(0, 8).map((product) => (
+              {filteredProducts.map((product) => (
                 <article key={product.id}>
                   <div><strong>{product.name}</strong><small>{product.sku} · {product.category} · {product.stock} available</small></div>
                   <strong>{formatMoney(product.price)}</strong>
@@ -322,107 +333,116 @@ export default function QuotationBuilderPage() {
                   </button>
                 </article>
               ))}
-              {!filteredProducts.length && <p className="empty-copy">No products match this search.</p>}
+              {!filteredProducts.length && (
+                <p className="empty-copy">
+                  {category === 'All'
+                    ? 'No products match this search.'
+                    : `No ${category.toLowerCase()} products match this search.`}
+                </p>
+              )}
             </div>
           )}
         </Panel>
       )}
 
-      <Panel title="Products" description="Every line is checked live against its product discount limit.">
-        <div className="quotation-table-wrap">
-          <table className="quotation-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Unit price</th>
-                <th>Rep discount</th>
-                <th>Limit</th>
-                <th>Line total</th>
-                <th>Status</th>
-                {editable && <th aria-label="Actions" />}
-              </tr>
-            </thead>
-            <tbody>
-              {calculation.lines.map((line) => (
-                <tr key={line.id}>
-                  <td><strong>{line.product.name}</strong><small>{line.product.sku} · {line.product.category}</small></td>
-                  <td>
-                    {editable ? (
-                      <div className="quantity-control">
-                        <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: Math.max(1, line.quantity - 1) })}><Minus size={13} /></button>
-                        <strong>{line.quantity}</strong>
-                        <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: line.quantity + 1 })}><Plus size={13} /></button>
-                      </div>
-                    ) : line.quantity}
-                  </td>
-                  <td>{formatMoney(line.product.price)}</td>
-                  <td>
-                    {editable ? (
-                      <label className="table-discount-input"><input type="number" min="0" max="100" value={line.discount} onChange={(event) => updateLine(quote.id, line.id, { discount: Number(event.target.value) })} /><span>%</span></label>
-                    ) : formatPercentage(line.discount)}
-                  </td>
-                  <td>{formatPercentage(line.allowedDiscount)}</td>
-                  <td><strong>{formatMoney(line.net)}</strong></td>
-                  <td><span className={`line-policy-status ${line.excess > 0 ? 'over' : 'ok'}`}>{line.excess > 0 ? `OVER (+${line.excess.toFixed(0)}pt)` : 'OK'}</span></td>
-                  {editable && <td><button className="icon-button danger-hover" type="button" onClick={() => removeLine(quote.id, line.id)} aria-label={`Remove ${line.product.name}`}><Trash2 size={16} /></button></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!calculation.lines.length && (
-            <div className="empty-cart"><PackagePlus size={24} /><strong>No products added</strong><span>Choose products from the live catalogue above.</span></div>
-          )}
-        </div>
-        <div className="discount-policy-note">
-          <AlertTriangle size={17} />
-          <span><strong>Discounts are checked live.</strong> Category, rep, customer-tier and order discounts are applied sequentially. A rep discount above its product limit makes the quote at least medium risk.</span>
-        </div>
-      </Panel>
-
-      {editable && quote.lines.length > 0 && (
-        <section className="quote-recommendations">
-          <Panel title="Upsell suggestions" description="Related alternatives from the selected product categories.">
-            <div className="quote-suggestion-list">
-              {suggestions.upsell.map(renderSuggestion)}
-              {!suggestions.upsell.length && <p className="empty-copy">No additional products in the selected categories.</p>}
+      <section className="quote-workbench">
+        <div className="quote-builder-main">
+          <Panel title="Quotation lines" description="Set quantity and rep discount for each selected product.">
+            <div className="quotation-table-wrap">
+              <table className="quotation-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Qty</th>
+                    <th>Unit price</th>
+                    <th>Discount</th>
+                    <th>Limit</th>
+                    <th>Line total</th>
+                    <th>Policy</th>
+                    {editable && <th aria-label="Actions" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {calculation.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td data-label="Product"><strong>{line.product.name}</strong><small>{line.product.sku} · {line.product.category}</small></td>
+                      <td data-label="Quantity">
+                        {editable ? (
+                          <div className="quantity-control">
+                            <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: Math.max(1, line.quantity - 1) })} disabled={line.quantity <= 1} aria-label={`Decrease ${line.product.name} quantity`}><Minus size={13} /></button>
+                            <strong>{line.quantity}</strong>
+                            <button type="button" onClick={() => updateLine(quote.id, line.id, { quantity: line.quantity + 1 })} aria-label={`Increase ${line.product.name} quantity`}><Plus size={13} /></button>
+                          </div>
+                        ) : line.quantity}
+                      </td>
+                      <td data-label="Unit price">{formatMoney(line.product.price)}</td>
+                      <td data-label="Rep discount">
+                        {editable ? (
+                          <PercentageControl
+                            value={line.discount}
+                            onChange={(discount) => updateLine(quote.id, line.id, { discount })}
+                            label={`${line.product.name} rep discount`}
+                            tone={line.excess > 0 ? 'over' : 'default'}
+                            compact
+                          />
+                        ) : formatPercentage(line.discount)}
+                      </td>
+                      <td data-label="Product limit"><strong>{formatPercentage(line.allowedDiscount)}</strong></td>
+                      <td data-label="Line total"><strong>{formatMoney(line.net)}</strong></td>
+                      <td data-label="Policy"><span className={`line-policy-status ${line.excess > 0 ? 'over' : 'ok'}`}>{line.excess > 0 ? `Approval +${line.excess.toFixed(1)}pt` : 'Within limit'}</span></td>
+                      {editable && <td className="quotation-line-action" data-label="Remove"><button className="icon-button danger-hover" type="button" onClick={() => removeLine(quote.id, line.id)} aria-label={`Remove ${line.product.name}`}><Trash2 size={16} /></button></td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!calculation.lines.length && (
+                <div className="empty-cart"><PackagePlus size={24} /><strong>No products added</strong><span>Choose products from the live catalogue above.</span></div>
+              )}
             </div>
           </Panel>
-          <Panel title="Cross-sell suggestions" description="Complementary products available in the catalogue.">
-            <div className="quote-suggestion-list">
-              {suggestions.crossSell.map(renderSuggestion)}
-              {!suggestions.crossSell.length && <p className="empty-copy">No complementary products available.</p>}
-            </div>
-          </Panel>
-        </section>
-      )}
+        </div>
 
-      <section className="quote-decision-bar">
-        <div className="quote-totals">
-          <span><small>Subtotal</small><strong>{formatMoney(calculation.gross)}</strong></span>
-          <span><small>Tier discount</small><strong>{formatPercentage(calculation.tierDiscount)}</strong></span>
-          {editable ? (
-            <label><small>Order discount</small><span><input type="number" min="0" max="100" value={quote.orderDiscount} onChange={(event) => updateQuote(quote.id, { orderDiscount: Number(event.target.value) })} />%</span></label>
-          ) : (
-            <span><small>Order discount</small><strong>{formatPercentage(quote.orderDiscount)}</strong></span>
-          )}
-          <span><small>Total discount</small><strong>{formatPercentage(calculation.discountPercentage)}</strong></span>
-          <span className="quote-grand-total"><small>Quotation total</small><strong>{formatMoney(calculation.total)}</strong></span>
-        </div>
-        <div className={`quote-risk-decision quote-risk-decision--${calculation.risk.toLowerCase()}`}>
-          {calculation.risk === 'LOW' ? <Check size={18} /> : <AlertTriangle size={18} />}
-          <span><strong>{workflow.title}</strong><small>{workflow.detail}</small></span>
-        </div>
-        {editable && (
-          <div className="quote-save-actions">
-            <button className="button button--secondary" type="button" onClick={() => persistQuote('DRAFT')} disabled={Boolean(saving) || catalogueLoading || Boolean(catalogueError)}>
-              <Save size={15} /> {saving === 'DRAFT' ? 'Saving…' : 'Save draft'}
-            </button>
-            <button className="button button--primary" type="button" onClick={() => persistQuote('PENDING_APPROVAL')} disabled={Boolean(saving) || catalogueLoading || Boolean(catalogueError)}>
-              <Send size={15} /> {saving === 'PENDING_APPROVAL' ? 'Submitting…' : workflow.action}
-            </button>
+        <aside className="quote-summary-card">
+          <header>
+            <span>LIVE PRICING</span>
+            <h2>Quotation summary</h2>
+            <p>Totals and approval routing update as you edit.</p>
+          </header>
+          <dl className="quote-summary-list">
+            <div><dt>Subtotal</dt><dd>{formatMoney(calculation.gross)}</dd></div>
+            <div><dt>Customer tier</dt><dd>{quote.customer.tier || 'Not selected'}</dd></div>
+            <div><dt>Tier discount</dt><dd>{formatPercentage(calculation.tierDiscount)}</dd></div>
+            <div className="quote-order-discount">
+              <dt>Order discount</dt>
+              <dd>
+                {editable ? (
+                  <PercentageControl
+                    compact
+                    value={quote.orderDiscount}
+                    onChange={(orderDiscount) => updateQuote(quote.id, { orderDiscount })}
+                    label="Order discount"
+                  />
+                ) : formatPercentage(quote.orderDiscount)}
+              </dd>
+            </div>
+            <div><dt>Effective discount</dt><dd>{formatPercentage(calculation.discountPercentage)}</dd></div>
+            <div className="quote-summary-total"><dt>Quotation total</dt><dd>{formatMoney(calculation.total)}</dd></div>
+          </dl>
+          <div className={`quote-risk-decision quote-risk-decision--${calculation.risk.toLowerCase()}`}>
+            {calculation.risk === 'LOW' ? <Check size={19} /> : <AlertTriangle size={19} />}
+            <span><strong>{workflow.title}</strong><small>{workflow.detail}</small></span>
           </div>
-        )}
+          {editable && (
+            <div className="quote-save-actions">
+              <button className="button button--secondary" type="button" onClick={() => persistQuote('DRAFT')} disabled={Boolean(saving) || catalogueLoading || Boolean(catalogueError)}>
+                <Save size={15} /> {saving === 'DRAFT' ? 'Saving…' : 'Save draft'}
+              </button>
+              <button className="button button--primary" type="button" onClick={() => persistQuote('PENDING_APPROVAL')} disabled={Boolean(saving) || catalogueLoading || Boolean(catalogueError)}>
+                <Send size={15} /> {saving === 'PENDING_APPROVAL' ? 'Submitting…' : workflow.action}
+              </button>
+            </div>
+          )}
+        </aside>
       </section>
     </div>
   )

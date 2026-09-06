@@ -2,7 +2,6 @@ import {
   CATEGORY_DISCOUNT_LIMITS,
   CUSTOMER_TIER_LIMITS,
   products,
-  warehouseData,
 } from './seed.js'
 
 export const productById = new Map(products.map((product) => [product.id, product]))
@@ -193,56 +192,6 @@ export function calculateQuote(quote, pricingPolicy = null) {
           ? 'MANAGER'
           : 'NONE',
   }
-}
-
-export function getRecommendedSplit(quote) {
-  const shipments = []
-
-  quote.lines.forEach((line) => {
-    const product = productById.get(line.productId)
-    if (!product || product.stock === null) return
-
-    let remaining = line.quantity
-    const candidates = [...warehouseData].sort(
-      (a, b) => a.shippingWeight - b.shippingWeight,
-    )
-
-    candidates.forEach((warehouse) => {
-      if (!remaining) return
-      const available = warehouse.stock[line.productId] ?? 0
-      const allocated = Math.min(available, remaining)
-      if (!allocated) return
-
-      let shipment = shipments.find((item) => item.warehouseId === warehouse.id)
-      if (!shipment) {
-        shipment = {
-          warehouseId: warehouse.id,
-          warehouse: warehouse.name,
-          city: warehouse.city,
-          serviceLevel: warehouse.serviceLevel,
-          cost: Math.round(1450 * warehouse.shippingWeight),
-          lines: [],
-        }
-        shipments.push(shipment)
-      }
-      shipment.lines.push({ productId: product.id, name: product.name, quantity: allocated })
-      remaining -= allocated
-    })
-
-    if (remaining) {
-      shipments.push({
-        warehouseId: `backorder-${product.id}`,
-        warehouse: 'Backorder',
-        city: 'Awaiting replenishment',
-        serviceLevel: 'Estimated 5-7 days',
-        cost: 0,
-        lines: [{ productId: product.id, name: product.name, quantity: remaining }],
-        backorder: true,
-      })
-    }
-  })
-
-  return shipments
 }
 
 export function getRecurringSchedule(quote) {

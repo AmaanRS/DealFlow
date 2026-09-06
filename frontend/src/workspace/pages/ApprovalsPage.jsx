@@ -3,7 +3,6 @@ import {
   Check,
   CheckCircle2,
   Clock3,
-  CornerUpLeft,
   FileCheck2,
   ShieldAlert,
   X,
@@ -21,27 +20,39 @@ export default function ApprovalsPage() {
   const { quotes, reviewQuote, user } = useWorkspace()
   const reviewerRole = user.role === USER_ROLES.MANAGER ? 'Sales manager' : 'Finance'
   const approvalQuotes = quotes.filter((quote) =>
-    ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REVISION'].includes(quote.stage) &&
+    ['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].includes(quote.stage) &&
     quote.approvalSteps.some((step) => step.role === reviewerRole),
   )
   const [selectedId, setSelectedId] = useState(quoteId || approvalQuotes[0]?.id)
   const [reason, setReason] = useState('')
-  const quote = approvalQuotes.find((item) => item.id === selectedId)
+  const [saving, setSaving] = useState(false)
+  const activeSelectedId = approvalQuotes.some((item) => item.id === selectedId)
+    ? selectedId
+    : approvalQuotes[0]?.id
+  const quote = approvalQuotes.find((item) => item.id === activeSelectedId)
 
-  function decide(decision) {
-    if (decision !== 'APPROVE' && reason.trim().length < 3) {
-      toast.error('Add a reason before returning or rejecting the quotation')
+  async function decide(decision) {
+    if (decision === 'REJECT' && reason.trim().length < 3) {
+      toast.error('Add a reason before rejecting the quotation')
       return
     }
-    reviewQuote(quote.id, decision, reason.trim())
-    setReason('')
-    toast.success(
-      decision === 'APPROVE'
-        ? 'Approval decision recorded'
-        : decision === 'REJECT'
+    setSaving(true)
+    try {
+      const result = await reviewQuote(quote.id, decision, reason.trim())
+      setReason('')
+      setSelectedId(result.quote.id)
+      toast.success(
+        decision === 'REJECT'
           ? 'Quotation rejected'
-          : 'Quotation returned to the sales rep',
-    )
+          : result.approval?.next_reviewer
+            ? 'Manager approval recorded and sent to Finance'
+            : 'Quotation approved',
+      )
+    } catch (error) {
+      toast.error(error.message || 'The approval decision could not be saved.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!quote) {
@@ -70,7 +81,7 @@ export default function ApprovalsPage() {
             {approvalQuotes.map((item) => {
               const itemCalculation = calculateQuote(item)
               return (
-                <button className={selectedId === item.id ? 'active' : ''} type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
+                <button className={activeSelectedId === item.id ? 'active' : ''} type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
                   <span><strong>{item.customer.name}</strong><small>{item.id} · {formatMoney(itemCalculation.total)}</small></span>
                   <span><StatusBadge status={item.stage} /><b>{itemCalculation.riskScore}</b></span>
                 </button>
@@ -130,12 +141,11 @@ export default function ApprovalsPage() {
               </div>
             </Panel>
 
-            <Panel title="Decision" description="A reason is mandatory when returning or rejecting.">
-              <textarea className="decision-reason" rows="4" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Add decision context for the audit trail…" disabled={!canAct} />
+            <Panel title="Decision" description="A reason is mandatory when rejecting.">
+              <textarea className="decision-reason" rows="4" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Add decision context for the audit trail…" disabled={!canAct || saving} />
               <div className="decision-actions">
-                <button className="button button--quiet" type="button" onClick={() => decide('RETURN')} disabled={!canAct}><CornerUpLeft size={15} /> Return</button>
-                <button className="button button--danger" type="button" onClick={() => decide('REJECT')} disabled={!canAct}><X size={15} /> Reject</button>
-                <button className="button button--success" type="button" onClick={() => decide('APPROVE')} disabled={!canAct}><CheckCircle2 size={15} /> Approve</button>
+                <button className="button button--danger" type="button" onClick={() => decide('REJECT')} disabled={!canAct || saving}><X size={15} /> {saving ? 'Saving…' : 'Reject'}</button>
+                <button className="button button--success" type="button" onClick={() => decide('APPROVE')} disabled={!canAct || saving}><CheckCircle2 size={15} /> {saving ? 'Saving…' : 'Approve'}</button>
               </div>
               {!canAct && (
                 <p className="decision-complete">

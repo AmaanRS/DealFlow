@@ -137,6 +137,37 @@ const realPortalApi = {
   logout() {
     return request(AUTH_ENDPOINTS.portalLogout, { method: 'POST' })
   },
+
+  listQuotations({ page = 1, limit = 50 } = {}) {
+    const query = new URLSearchParams({ page: String(page), limit: String(limit) })
+    return request(`${AUTH_ENDPOINTS.portalQuotations}?${query}`)
+  },
+
+  getQuotation(quotationId) {
+    const query = quotationId
+      ? `?${new URLSearchParams({ quotationId })}`
+      : ''
+    return request(`${AUTH_ENDPOINTS.portalQuotation}${query}`)
+  },
+
+  getQuotationHistory(quotationId) {
+    const query = new URLSearchParams({ quotationId })
+    return request(`${AUTH_ENDPOINTS.portalQuotationHistory}?${query}`)
+  },
+
+  submitNegotiation(payload) {
+    return request(AUTH_ENDPOINTS.portalNegotiations, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  confirmQuotation(quotationId) {
+    return request(AUTH_ENDPOINTS.portalConfirm, {
+      method: 'POST',
+      body: JSON.stringify({ quotationId }),
+    })
+  },
 }
 
 export const portalApi = useMockApi ? mockPortalApi : realPortalApi

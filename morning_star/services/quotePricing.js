@@ -100,6 +100,24 @@ export function applyCreationRiskWorkflow(pricedQuotation) {
   });
 }
 
+/**
+ * Re-price ordinary sales edits using the creation workflow, while preserving
+ * the manager approval marker on a HIGH-risk quote that is waiting for Finance.
+ */
+export function applyUpdateRiskWorkflow(pricedQuotation) {
+  const awaitingFinance =
+    pricedQuotation.status === "PENDING_APPROVAL" &&
+    pricedQuotation.risk === "HIGH" &&
+    pricedQuotation.approved_by &&
+    pricedQuotation.approved_by !== AUTO_APPROVER;
+
+  if (awaitingFinance) return normalizeQuoteInput(pricedQuotation);
+
+  return ["DRAFT", "PENDING_APPROVAL"].includes(pricedQuotation.status)
+    ? applyCreationRiskWorkflow(pricedQuotation)
+    : normalizeQuoteInput(pricedQuotation);
+}
+
 function rejectUnknownFields(value, allowedFields, location) {
   const unknownFields = Object.keys(value).filter(
     (field) => !allowedFields.includes(field),

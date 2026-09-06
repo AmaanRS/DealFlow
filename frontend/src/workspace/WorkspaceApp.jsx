@@ -73,7 +73,7 @@ const CONFIGURATION_LINKS = [
     section: 'discounts',
     label: 'Discount policy',
     icon: BadgePercent,
-    roles: [USER_ROLES.ADMIN, USER_ROLES.MANAGER],
+    roles: [USER_ROLES.ADMIN],
   },
   {
     to: '/configuration/risk',
@@ -91,7 +91,7 @@ const navigation = [
       to: '/dashboard',
       label: 'Overview',
       icon: ChartNoAxesCombined,
-      roles: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER],
+      roles: [USER_ROLES.MANAGER],
     }],
   },
   {
@@ -156,7 +156,7 @@ const routeTitles = {
 }
 
 const routeRoles = {
-  dashboard: [USER_ROLES.SALES_REP, USER_ROLES.MANAGER],
+  dashboard: [USER_ROLES.MANAGER],
   quotations: [USER_ROLES.SALES_REP],
   approvals: [USER_ROLES.MANAGER, USER_ROLES.FINANCE],
   fulfillment: [USER_ROLES.SALES_REP, USER_ROLES.FINANCE],
@@ -168,7 +168,7 @@ const homeByRole = {
   [USER_ROLES.ADMIN]: '/configuration/products',
   [USER_ROLES.MANAGER]: '/dashboard',
   [USER_ROLES.FINANCE]: '/approvals',
-  [USER_ROLES.SALES_REP]: '/dashboard',
+  [USER_ROLES.SALES_REP]: '/quotations',
 }
 
 function BrandMark() {

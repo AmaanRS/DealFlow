@@ -453,6 +453,17 @@ function InternalAuth({ theme, onThemeToggle }) {
   }
 
   if (sessionUser) {
+    if (sessionUser.role === USER_ROLES.CUSTOMER) {
+      return (
+        <CustomerPortal
+          internalUser={sessionUser}
+          onInternalLogout={handleLogout}
+          theme={theme}
+          onThemeToggle={onThemeToggle}
+        />
+      )
+    }
+
     return (
       <WorkspaceApp
         user={sessionUser}
@@ -679,7 +690,6 @@ function InternalAuth({ theme, onThemeToggle }) {
 
                         <div className="role-choice-divider">
                           <span>Or request internal team access</span>
-                          <small>Choose one only if you work inside DealFlow360.</small>
                         </div>
 
                         <div className="role-options">

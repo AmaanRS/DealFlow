@@ -61,6 +61,10 @@ routes:
     name: DealFlow React application
     uri: /*
     priority: 0
+    # The Vite dev server serves hot-module-reload over a WebSocket on this same
+    # origin. Without the upgrade, the browser falls back to a failing socket and
+    # every edit needs a manual refresh.
+    enable_websocket: true
     upstream:
       type: roundrobin
       pass_host: pass

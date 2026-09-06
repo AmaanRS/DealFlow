@@ -220,35 +220,8 @@ export const initialQuotes = [
 // `dashboardTrend` was removed with the seeded revenue chart. The dashboard now
 // derives every figure it shows from the quotations returned by Morning Star.
 
-export const warehouseData = [
-  {
-    id: 'wh-main',
-    name: 'Main Warehouse',
-    city: 'Mumbai',
-    serviceLevel: 'Same day',
-    shippingWeight: 1,
-    utilization: 76,
-    stock: { 'prod-apexbook': 10, 'prod-dock': 4, 'prod-monitor': 16 },
-  },
-  {
-    id: 'wh-east',
-    name: 'East Depot',
-    city: 'Kolkata',
-    serviceLevel: 'Next day',
-    shippingWeight: 1.15,
-    utilization: 54,
-    stock: { 'prod-apexbook': 8, 'prod-dock': 5, 'prod-monitor': 8 },
-  },
-  {
-    id: 'wh-south',
-    name: 'South Hub',
-    city: 'Bengaluru',
-    serviceLevel: 'Next day',
-    shippingWeight: 1.08,
-    utilization: 61,
-    stock: { 'prod-apexbook': 5, 'prod-dock': 11, 'prod-monitor': 12 },
-  },
-]
+// `warehouseData` was removed with the seeded warehouse split. Fulfillment
+// now allocates against real stores and live sellable inventory.
 
 // `subscriptionPlans` and `reportRows` were removed with the seeded Reports
 // page and the invented recurring-plan tab. Subscriptions are now real products
@@ -260,11 +233,9 @@ export const upsellSuggestions = [
   { id: 'suggest-secure', productId: 'prod-secure', reason: 'Frequently paired with CloudCare Plus', marginDelta: 36000, promoted: true },
 ]
 
-export const discountRules = [
-  { tier: 'Bronze', ceiling: 5, managerFrom: 6, financeFrom: 14 },
-  { tier: 'Silver', ceiling: 10, managerFrom: 11, financeFrom: 18 },
-  { tier: 'Gold', ceiling: 15, managerFrom: 16, financeFrom: 22 },
-]
+// `discountRules` was removed with the seeded tier table. Tiers, their
+// discount ceilings and their lifetime-spend thresholds now come from
+// GET /v1/api/admin/discount_policy.
 
 export const stageMeta = {
   DRAFT: { label: 'Draft', tone: 'neutral' },

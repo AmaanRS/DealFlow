@@ -1,7 +1,8 @@
 import {
-  BadgePercent,
   Boxes,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Plus,
   RefreshCw,
   Save,
@@ -16,7 +17,6 @@ import { authApi } from '../../api/authApi.js'
 import { getRoleLabel, SIGNUP_ROLE_OPTIONS } from '../../contracts/auth.js'
 import { productApi } from '../../api/productApi.js'
 import { storeApi } from '../../api/storeApi.js'
-import { discountRules as seededDiscountRules } from '../seed.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatusBadge } from '../components/Ui.jsx'
 
@@ -39,7 +39,7 @@ const CONFIGURATION_SECTIONS = Object.freeze({
       'A subscription is a product tagged SUBSCRIPTION. Its billing cycle and recurring price live on the subscription record.',
   },
   discounts: {
-    eyebrow: 'Pricing policy',
+    eyebrow: '',
     title: 'Discount policy',
     description:
       'Customer-tier and product-category ceilings. Quote risk is scored against the lower of the two.',
@@ -64,6 +64,32 @@ const CONFIGURATION_SECTIONS = Object.freeze({
   },
 })
 
+/**
+ * Fallback tiers, matching `DEFAULT_CUSTOMER_TIERS` in @app/models/discounts.
+ * The backend seeds these on boot, so they are only used to render the form
+ * before the first policy read returns.
+ */
+const DEFAULT_TIERS = Object.freeze([
+  { tier: 'BRONZE', discount: 0, threshold: 0 },
+  { tier: 'SILVER', discount: 0, threshold: 0 },
+  { tier: 'GOLD', discount: 0, threshold: 0 },
+])
+
+/**
+ * Tier thresholds are lifetime spend in rupees and get large, so they are shown
+ * compactly (₹1.5L) rather than as a long digit string.
+ */
+function formatThreshold(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '₹0'
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: amount >= 100000 ? 1 : 0,
+    notation: amount >= 100000 ? 'compact' : 'standard',
+  }).format(amount)
+}
+
 const emptyProductForm = {
   name: '',
   category: 'HARDWARE',
@@ -76,11 +102,23 @@ const emptyProductForm = {
   cycle: 'MONTHLY',
 }
 
+/**
+ * Show the coordinate exactly as stored. Padding to a fixed number of decimals
+ * would line the columns up but imply precision the record does not have, so
+ * alignment is left to `font-variant-numeric: tabular-nums` on the cell.
+ */
+function formatCoordinate(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? String(parsed) : '—'
+}
+
 const emptyStoreForm = {
   name: '',
   lat: '',
   long: '',
 }
+
+const PRODUCT_PAGE_SIZE = 8
 
 /**
  * One catalogue view with two modes.
@@ -93,6 +131,12 @@ const emptyStoreForm = {
 function ProductsConfiguration({ mode = 'physical' }) {
   const subscriptionMode = mode === 'subscription'
   const [products, setProducts] = useState([])
+  const [productPage, setProductPage] = useState(1)
+  const [productPagination, setProductPagination] = useState({
+    page: 1,
+    total: 0,
+    totalPages: 1,
+  })
   const [stores, setStores] = useState([])
   const [catalogueState, setCatalogueState] = useState({ loading: true, error: '' })
   const [form, setForm] = useState(() => ({
@@ -110,14 +154,24 @@ function ProductsConfiguration({ mode = 'physical' }) {
 
   useEffect(() => {
     let mounted = true
+    const productRequest = productApi.list({
+      page: productPage,
+      limit: PRODUCT_PAGE_SIZE,
+      category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE,SERVICES',
+    })
     const requests = subscriptionMode
-      ? [productApi.list()]
-      : [productApi.list(), storeApi.list()]
+      ? [productRequest]
+      : [productRequest, storeApi.list()]
 
     Promise.all(requests)
       .then(([productResult, storeResult]) => {
         if (!mounted) return
         setProducts(productResult.products ?? [])
+        setProductPagination({
+          page: productResult.pagination?.page ?? productPage,
+          total: productResult.pagination?.total ?? 0,
+          totalPages: Math.max(1, productResult.pagination?.total_pages ?? 1),
+        })
         setStores(storeResult?.stores ?? [])
         setCatalogueState({ loading: false, error: '' })
       })
@@ -126,7 +180,18 @@ function ProductsConfiguration({ mode = 'physical' }) {
       })
 
     return () => { mounted = false }
-  }, [subscriptionMode])
+  }, [productPage, subscriptionMode])
+
+  function changeProductPage(nextPage) {
+    if (
+      nextPage < 1 ||
+      nextPage > productPagination.totalPages ||
+      nextPage === productPage
+    ) return
+    setInventoryDraft(null)
+    setCatalogueState({ loading: true, error: '' })
+    setProductPage(nextPage)
+  }
 
   function updateField(field, value) {
     if (field === 'hsnCode' || field === 'gst') setPreparedHsn('')
@@ -165,8 +230,18 @@ function ProductsConfiguration({ mode = 'physical' }) {
           restock_point: isSubscription ? 0 : Number(form.restockPoint),
         }],
       })
-      const refreshed = await productApi.list()
+      const refreshed = await productApi.list({
+        page: 1,
+        limit: PRODUCT_PAGE_SIZE,
+        category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE,SERVICES',
+      })
       setProducts(refreshed.products ?? [])
+      setProductPage(1)
+      setProductPagination({
+        page: refreshed.pagination?.page ?? 1,
+        total: refreshed.pagination?.total ?? 0,
+        totalPages: Math.max(1, refreshed.pagination?.total_pages ?? 1),
+      })
       setForm({
         ...emptyProductForm,
         category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE',
@@ -204,8 +279,17 @@ function ProductsConfiguration({ mode = 'physical' }) {
         store_id: inventoryDraft.storeId,
         inventory: { sellable, reserved },
       })
-      const refreshed = await productApi.list()
+      const refreshed = await productApi.list({
+        page: productPage,
+        limit: PRODUCT_PAGE_SIZE,
+        category: 'HARDWARE,SERVICES',
+      })
       setProducts(refreshed.products ?? [])
+      setProductPagination({
+        page: refreshed.pagination?.page ?? productPage,
+        total: refreshed.pagination?.total ?? 0,
+        totalPages: Math.max(1, refreshed.pagination?.total_pages ?? 1),
+      })
       toast.success(`Inventory added to ${inventoryDraft.name}`, {
         description: `${sellable} sellable and ${reserved} reserved units added.`,
       })
@@ -364,6 +448,33 @@ function ProductsConfiguration({ mode = 'physical' }) {
           <div className="product-form-warning">Create a store from the Stores screen before adding physical inventory.</div>
         )}
 
+        {!catalogueState.error && productPagination.totalPages > 1 && (
+          <nav className="product-pagination" aria-label="Product catalogue pages">
+            <span>
+              Page <strong>{productPagination.page}</strong> of <strong>{productPagination.totalPages}</strong>
+              <small>{productPagination.total} product records</small>
+            </span>
+            <div>
+              <button
+                className="button button--quiet button--small"
+                type="button"
+                onClick={() => changeProductPage(productPage - 1)}
+                disabled={catalogueState.loading || productPage <= 1}
+              >
+                <ChevronLeft size={14} /> Previous
+              </button>
+              <button
+                className="button button--quiet button--small"
+                type="button"
+                onClick={() => changeProductPage(productPage + 1)}
+                disabled={catalogueState.loading || productPage >= productPagination.totalPages}
+              >
+                Next <ChevronRight size={14} />
+              </button>
+            </div>
+          </nav>
+        )}
+
         {!subscriptionMode && inventoryDraft && (
           <form className="inventory-add-form" onSubmit={addInventory}>
             <div>
@@ -410,10 +521,11 @@ function DiscountConfiguration({
   policyState,
 }) {
   const tierDetails = {
-    Bronze: 'New and entry-level customer accounts',
-    Silver: 'Established customers with regular orders',
-    Gold: 'Strategic customers with the highest allowance',
+    BRONZE: 'Entry tier every new customer starts on',
+    SILVER: 'Established customers with regular orders',
+    GOLD: 'Strategic customers with the highest allowance',
   }
+  const entryTier = rules[0]?.tier
 
   const categories = [
     { key: 'hardware', name: 'Hardware', detail: 'Protect physical product margins', icon: Boxes },
@@ -435,8 +547,8 @@ function DiscountConfiguration({
       {policyState.error && <div className="inline-error">{policyState.error}</div>}
 
       <Panel
-        title="Customer tier limits"
-        description="Set the maximum discretionary discount available for each customer tier."
+        title="Customer tiers"
+        description="Each tier sets a discount ceiling and the lifetime spend that earns it. A customer is promoted automatically once a completed order pushes their total past a threshold."
         className="discount-policy-panel"
       >
         <div className="discount-tier-grid">
@@ -455,15 +567,34 @@ function DiscountConfiguration({
                     min="0"
                     max="100"
                     step="1"
-                    value={rule.ceiling}
+                    value={rule.discount}
                     disabled={!canManage || policyState.loading || Boolean(policyState.error)}
-                    onChange={(event) => updateRule(rule.tier, 'ceiling', event.target.value)}
+                    onChange={(event) => updateRule(rule.tier, 'discount', event.target.value)}
                   />
                   <i>%</i>
                 </span>
               </label>
+              <label className="discount-limit-field" htmlFor={`threshold-${rule.tier.toLowerCase()}`}>
+                <span>Lifetime spend to reach it</span>
+                <span className="discount-percentage-input discount-percentage-input--currency">
+                  <i>₹</i>
+                  <input
+                    id={`threshold-${rule.tier.toLowerCase()}`}
+                    type="number"
+                    min="0"
+                    step="1000"
+                    value={rule.threshold}
+                    disabled={!canManage || policyState.loading || Boolean(policyState.error)}
+                    onChange={(event) => updateRule(rule.tier, 'threshold', event.target.value)}
+                  />
+                </span>
+              </label>
               <footer>
-                <small>Used as the account-level ceiling on every quotation.</small>
+                <small>
+                  {rule.tier === entryTier && rule.threshold === 0
+                    ? 'Entry tier: every customer starts here.'
+                    : `Applied once lifetime spend passes ${formatThreshold(rule.threshold)}.`}
+                </small>
                 <button
                   className="button button--quiet button--small"
                   type="button"
@@ -523,10 +654,6 @@ function DiscountConfiguration({
               </label>
             </article>
           ))}
-        </div>
-        <div className="discount-policy-note">
-          <BadgePercent size={18} />
-          <p><strong>Example:</strong> a Gold customer with a 15% tier limit buying a Service capped at 10% can receive at most 10% on that line.</p>
         </div>
       </Panel>
     </div>
@@ -603,13 +730,29 @@ function WarehouseConfiguration() {
         </form>
       </Panel>
 
-      <Panel title="Stores" description="Fulfillment locations currently available for inventory assignment.">
+      <Panel
+        title="Stores"
+        description="Fulfillment locations currently available for inventory assignment."
+        action={!storeState.loading && stores.length
+          ? <span className="panel-count">{stores.length} store{stores.length === 1 ? '' : 's'}</span>
+          : null}
+      >
         {storeState.loading ? <p className="empty-copy empty-copy--large">Loading stores…</p> : (
           <div className="warehouse-config-grid">
             {stores.map((store) => (
               <article key={store._id}>
-                <header><span><Warehouse size={18} /></span><div><strong>{store.name}</strong><small>Store ID · {String(store._id).slice(-6).toUpperCase()}</small></div><StatusBadge status="APPROVED" label="Active" /></header>
-                <dl><div><dt>Latitude</dt><dd>{store.lat}</dd></div><div><dt>Longitude</dt><dd>{store.long}</dd></div></dl>
+                <header>
+                  <span><Warehouse size={17} /></span>
+                  <div>
+                    <strong>{store.name}</strong>
+                    <small title={String(store._id)}>ID · {String(store._id).slice(-6).toUpperCase()}</small>
+                  </div>
+                  <StatusBadge status="APPROVED" label="Active" />
+                </header>
+                <dl>
+                  <div><dt>Latitude</dt><dd>{formatCoordinate(store.lat)}</dd></div>
+                  <div><dt>Longitude</dt><dd>{formatCoordinate(store.long)}</dd></div>
+                </dl>
               </article>
             ))}
             {!stores.length && <p className="empty-copy empty-copy--large">No stores created yet.</p>}
@@ -713,28 +856,11 @@ function RiskConfiguration() {
           )}
 
           <footer className="product-create-actions">
-            <small>
-              {riskData.updatedAt
-                ? `Last changed ${new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(riskData.updatedAt))}.`
-                : 'No override saved yet, so Morning Star is using its built-in defaults.'}
-            </small>
             <button className="button button--primary" type="submit" disabled={saving || invalidOrder}>
               <Save size={15} /> {saving ? 'Saving thresholds…' : 'Save thresholds'}
             </button>
           </footer>
         </form>
-      </Panel>
-
-      <Panel title="Line-item rule" description="Applied before the thresholds above and not configurable.">
-        <dl className="allocation-summary">
-          <div><dt>Condition</dt><dd><code>{riskData.line_item_rule.condition}</code></dd></div>
-          <div><dt>Minimum risk when triggered</dt><dd>{riskData.line_item_rule.minimum_risk}</dd></div>
-        </dl>
-        <p className="empty-copy">
-          Any single line discounted beyond its own product ceiling raises the whole
-          quotation to at least {riskData.line_item_rule.minimum_risk}, even when the
-          order-level discount stays under the MEDIUM threshold.
-        </p>
       </Panel>
     </div>
   )
@@ -875,10 +1001,9 @@ export default function ConfigurationPage({ section = 'products' }) {
   const { user } = useWorkspace()
   const activeTab = section
   const copy = CONFIGURATION_SECTIONS[section] ?? CONFIGURATION_SECTIONS.products
-  const [rules, setRules] = useState(() => seededDiscountRules.map((rule) => ({
-    ...rule,
-    persisted: false,
-  })))
+  const [rules, setRules] = useState(() =>
+    DEFAULT_TIERS.map((tier) => ({ ...tier, persisted: false })),
+  )
   const [categoryRules, setCategoryRules] = useState({
     hardware: 15,
     service: 10,
@@ -916,23 +1041,32 @@ export default function ConfigurationPage({ section = 'products' }) {
   }, [activeTab, user.role])
 
   useEffect(() => {
-    if (activeTab !== 'discounts') return
+    if (activeTab !== 'discounts' || user.role !== 'ADMIN') return
     let mounted = true
 
     authApi.getDiscountPolicy()
       .then((result) => {
         if (!mounted) return
-        const persistedTiers = new Map(
-          (result.tier_discounts ?? []).map((item) => [item.tier.toUpperCase(), item]),
-        )
-        setRules(seededDiscountRules.map((rule) => {
-          const saved = persistedTiers.get(rule.tier.toUpperCase())
-          return {
-            ...rule,
-            ceiling: saved?.discount ?? rule.ceiling,
-            persisted: Boolean(saved),
-          }
+        // Tiers come from the policy itself rather than a fixed local list, so
+        // a tier added server side shows up here. Ordered by threshold, which
+        // is the order promoteCustomerTier walks when deciding an upgrade.
+        const saved = (result.tier_discounts ?? []).map((item) => ({
+          tier: item.tier.toUpperCase(),
+          discount: item.discount ?? 0,
+          threshold: item.threshold ?? 0,
+          persisted: true,
         }))
+        const savedNames = new Set(saved.map((item) => item.tier))
+        const missing = DEFAULT_TIERS
+          .filter((item) => !savedNames.has(item.tier))
+          .map((item) => ({ ...item, persisted: false }))
+
+        setRules(
+          [...saved, ...missing].sort(
+            (left, right) =>
+              left.threshold - right.threshold || left.tier.localeCompare(right.tier),
+          ),
+        )
 
         const savedCategory = result.category_discount
         if (savedCategory) {
@@ -952,7 +1086,7 @@ export default function ConfigurationPage({ section = 'products' }) {
       })
 
     return () => { mounted = false }
-  }, [activeTab])
+  }, [activeTab, user.role])
 
   async function reviewRegistration(requestId, decision, reason = null) {
     if (reviewing) return
@@ -985,16 +1119,27 @@ export default function ConfigurationPage({ section = 'products' }) {
     try {
       const payload = {
         tier: rule.tier.toUpperCase(),
-        discount: rule.ceiling,
+        discount: rule.discount,
+        threshold: rule.threshold,
       }
       const result = rule.persisted
         ? await authApi.updateTierDiscount(payload)
         : await authApi.createTierDiscount(payload)
-      setRules((current) => current.map((item) => item.tier === rule.tier
-        ? { ...item, ceiling: result.tier_discount.discount, persisted: true }
-        : item))
-      toast.success(`${result.tier_discount.tier} tier ${rule.persisted ? 'updated' : 'created'}`, {
-        description: `${result.tier_discount.discount}% customer discount`,
+      const saved = result.tier_discount
+      // Re-sort: changing a threshold can move a tier past its neighbour.
+      setRules((current) => current
+        .map((item) => item.tier === rule.tier
+          ? {
+              ...item,
+              discount: saved.discount,
+              threshold: saved.threshold ?? 0,
+              persisted: true,
+            }
+          : item)
+        .sort((left, right) =>
+          left.threshold - right.threshold || left.tier.localeCompare(right.tier)))
+      toast.success(`${saved.tier} tier ${rule.persisted ? 'updated' : 'created'}`, {
+        description: `${saved.discount}% discount, reached at ${formatThreshold(saved.threshold ?? 0)} lifetime spend.`,
       })
     } catch (error) {
       toast.error(error.message)
@@ -1044,7 +1189,7 @@ export default function ConfigurationPage({ section = 'products' }) {
           onCreateCategory={createCategoryDiscount}
           savingTier={savingTier}
           savingCategory={savingCategory}
-          canManage={['ADMIN', 'MANAGER'].includes(user.role)}
+          canManage={user.role === 'ADMIN'}
           categoryPersisted={categoryPersisted}
           policyState={policyState}
         />

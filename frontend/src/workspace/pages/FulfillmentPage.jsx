@@ -1,175 +1,411 @@
 import {
-  ArrowRight,
+  AlertTriangle,
   Boxes,
   Check,
-  CircleDollarSign,
   MapPin,
   PackageCheck,
+  PackageX,
   RefreshCcw,
   Route,
-  Settings2,
   Truck,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { USER_ROLES } from '../../contracts/auth.js'
-import { calculateQuote, formatMoney, getRecommendedSplit } from '../dealMath.js'
-import { warehouseData } from '../seed.js'
-import { useWorkspace } from '../WorkspaceContext.jsx'
+import { productApi } from '../../api/productApi.js'
+import { quoteApi } from '../../api/quoteApi.js'
+import { storeApi } from '../../api/storeApi.js'
+import { formatMoney } from '../dealMath.js'
 import { PageHeader, Panel, StatusBadge } from '../components/Ui.jsx'
 
+/** Metres are the allocator's unit; kilometres are what a human reads. */
+function formatDistance(metres) {
+  if (!Number.isFinite(metres)) return 'Distance unavailable'
+  if (metres < 1000) return `${Math.round(metres)} m away`
+  return `${(metres / 1000).toFixed(metres < 10_000 ? 1 : 0)} km away`
+}
+
+/**
+ * Collapse the per-line allocation into one group per store.
+ *
+ * A shipment is a store, not a line: two lines pulled from the same warehouse
+ * travel together, which is exactly the count the allocator is trying to keep
+ * down. Distance is a property of the store, so it is the same on every line
+ * within a group.
+ */
+function groupByStore(articles) {
+  const groups = new Map()
+
+  for (const article of articles) {
+    const store = article.store_id
+    // A subscription line carries no store and is not shipped.
+    if (!store || typeof store !== 'object') continue
+
+    const storeId = String(store._id)
+    const group = groups.get(storeId) ?? {
+      storeId,
+      name: store.name,
+      lat: store.lat,
+      long: store.long,
+      distanceMetres: article.distance_meters,
+      units: 0,
+      lines: [],
+    }
+
+    group.units += article.inv ?? 0
+    group.lines.push({
+      id: String(article._id),
+      sku: article.seller_identifier,
+      quantity: article.inv ?? 0,
+      sellable: article.inventory?.sellable ?? 0,
+    })
+    if (Number.isFinite(article.distance_meters)) {
+      group.distanceMetres = article.distance_meters
+    }
+    groups.set(storeId, group)
+  }
+
+  return [...groups.values()].sort((left, right) => {
+    const leftDistance = Number.isFinite(left.distanceMetres) ? left.distanceMetres : Infinity
+    const rightDistance = Number.isFinite(right.distanceMetres) ? right.distanceMetres : Infinity
+    return leftDistance - rightDistance || left.name.localeCompare(right.name)
+  })
+}
+
+/**
+ * A quotation line that has no store yet. Until the allocation runs, or when no
+ * store holds enough stock, these are the lines blocking the order.
+ */
+function unallocatedLines(articles) {
+  return articles
+    .filter((article) => !article.store_id || typeof article.store_id !== 'object')
+    .map((article) => ({
+      id: String(article._id),
+      sku: article.seller_identifier,
+      quantity: article.inv ?? 0,
+      sellable: article.inventory?.sellable ?? 0,
+    }))
+}
+
 export default function FulfillmentPage() {
-  const { quotes, updateQuote, user } = useWorkspace()
-  const canManage = user.role === USER_ROLES.FINANCE
-  const eligible = quotes.filter((quote) => ['APPROVED', 'FULFILLMENT', 'CONFIRMED'].includes(quote.stage))
-  const [quoteId, setQuoteId] = useState(eligible.find((quote) => quote.stage === 'FULFILLMENT')?.id || eligible[0]?.id)
-  const quote = eligible.find((item) => item.id === quoteId)
-  const [shipments, setShipments] = useState(() => (quote ? getRecommendedSplit(quote) : []))
-  const [manual, setManual] = useState(false)
-  const [accepted, setAccepted] = useState(false)
-  const [backorderReady, setBackorderReady] = useState(true)
+  const [orders, setOrders] = useState([])
+  const [ordersState, setOrdersState] = useState({ loading: true, error: '' })
+  const [quoteId, setQuoteId] = useState('')
+  const [allocation, setAllocation] = useState(null)
+  const [allocationState, setAllocationState] = useState({ loading: false, error: '' })
+  const [shortage, setShortage] = useState(null)
+  const [storeCount, setStoreCount] = useState(null)
+  const [allocating, setAllocating] = useState(false)
 
-  function selectQuote(nextQuoteId) {
-    const nextQuote = eligible.find((item) => item.id === nextQuoteId)
+  useEffect(() => {
+    let mounted = true
+
+    Promise.all([quoteApi.listApproved(), storeApi.list()])
+      .then(([quoteResult, storeResult]) => {
+        if (!mounted) return
+        const approved = quoteResult.quotes ?? []
+        setOrders(approved)
+        setStoreCount((storeResult.stores ?? []).length)
+        setQuoteId((current) => current || String(approved[0]?._id ?? ''))
+        setOrdersState({ loading: false, error: '' })
+      })
+      .catch((error) => {
+        if (mounted) setOrdersState({ loading: false, error: error.message })
+      })
+
+    return () => { mounted = false }
+  }, [])
+
+  /**
+   * Fetch where each line of `targetQuoteId` is currently allocated. The first
+   * state write is deferred by a microtask so this stays safe to call straight
+   * from an effect without triggering a cascading render.
+   */
+  const loadAllocation = useCallback((targetQuoteId) => {
+    if (!targetQuoteId) return undefined
+    let mounted = true
+
+    Promise.resolve()
+      .then(() => {
+        if (!mounted) return null
+        setAllocationState({ loading: true, error: '' })
+        return productApi.quoteInventory(targetQuoteId)
+      })
+      .then((result) => {
+        if (!mounted || !result) return
+        setAllocation(result.articles ?? [])
+        setAllocationState({ loading: false, error: '' })
+      })
+      .catch((error) => {
+        if (mounted) setAllocationState({ loading: false, error: error.message })
+      })
+
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => loadAllocation(quoteId), [loadAllocation, quoteId])
+
+  /** A shortage belongs to one order, so switching orders clears it. */
+  function selectOrder(nextQuoteId) {
+    setShortage(null)
     setQuoteId(nextQuoteId)
-    setShipments(nextQuote ? getRecommendedSplit(nextQuote) : [])
-    setManual(false)
-    setAccepted(false)
-    setBackorderReady(true)
   }
 
-  if (!quote) {
-    return <div className="page-stack"><PageHeader eyebrow="Operations" title="Warehouse fulfillment" description="Approve a quotation before planning its stock allocation." /></div>
-  }
-
-  const shippingCost = shipments.reduce((sum, shipment) => sum + shipment.cost, 0)
-  const backordered = shipments.reduce(
-    (sum, shipment) => sum + (shipment.backorder ? shipment.lines.reduce((count, line) => count + line.quantity, 0) : 0),
+  const order = orders.find((item) => String(item._id) === quoteId)
+  const groups = useMemo(() => groupByStore(allocation ?? []), [allocation])
+  const pending = useMemo(() => unallocatedLines(allocation ?? []), [allocation])
+  const allocatedUnits = groups.reduce((sum, group) => sum + group.units, 0)
+  const pendingUnits = pending.reduce((sum, line) => sum + line.quantity, 0)
+  const furthest = groups.reduce(
+    (max, group) => (Number.isFinite(group.distanceMetres) ? Math.max(max, group.distanceMetres) : max),
     0,
   )
-  const calculation = calculateQuote(quote)
 
-  function acceptSplit() {
-    setAccepted(true)
-    updateQuote(quote.id, (current) => ({
-      ...current,
-      stage: 'FULFILLMENT',
-      audit: [
-        { id: `audit-${crypto.randomUUID()}`, actor: 'Operations desk', action: 'Warehouse split accepted', detail: `${shipments.length} shipment groups reserved at ${formatMoney(shippingCost)} estimated cost.`, time: 'Just now' },
-        ...current.audit,
-      ],
-    }))
-    toast.success('Inventory reservations created', { description: `${shipments.length} shipment groups are now planned.` })
+  /**
+   * Runs the allocator and persists the result. Night Sky returns 409
+   * NO_ELIGIBLE_STORE when no single store can cover a line, which is the
+   * backorder case: the order stays as it was and the shortage is surfaced so
+   * the rep can retry once stock lands.
+   */
+  async function acceptSuggestedSplit() {
+    setAllocating(true)
+    setShortage(null)
+    try {
+      const result = await storeApi.split(quoteId)
+      loadAllocation(quoteId)
+      const shipments = new Set(
+        (result.store_split ?? []).map((assignment) => assignment.store_id),
+      ).size
+      toast.success('Allocation accepted', {
+        description: `${result.store_split?.length ?? 0} line${result.store_split?.length === 1 ? '' : 's'} reserved across ${shipments} shipment${shipments === 1 ? '' : 's'}.`,
+      })
+    } catch (error) {
+      if (error.code === 'NO_ELIGIBLE_STORE') {
+        setShortage(error)
+        toast.warning('Not enough stock in any one store', {
+          description: 'The order stays unallocated until inventory is topped up.',
+        })
+      } else {
+        toast.error(error.message ?? 'The allocation could not be completed.')
+      }
+    } finally {
+      setAllocating(false)
+    }
   }
 
-  function adjustQuantity(shipmentIndex, lineIndex, value) {
-    setShipments((current) => current.map((shipment, currentShipmentIndex) =>
-      currentShipmentIndex === shipmentIndex
-        ? { ...shipment, lines: shipment.lines.map((line, currentLineIndex) => currentLineIndex === lineIndex ? { ...line, quantity: Math.max(0, Number(value)) } : line) }
-        : shipment,
-    ))
+  if (ordersState.loading) {
+    return (
+      <div className="page-stack">
+        <PageHeader eyebrow="Operations" title="Warehouse fulfillment" />
+        <Panel><p className="empty-copy empty-copy--large">Loading approved orders…</p></Panel>
+      </div>
+    )
   }
 
-  function consolidateBackorder() {
-    setBackorderReady(false)
-    setShipments((current) => current.filter((shipment) => !shipment.backorder))
-    toast.success('Remaining backorder consolidated', { description: 'New stock was assigned to the Main Warehouse shipment.' })
+  if (ordersState.error) {
+    return (
+      <div className="page-stack">
+        <PageHeader eyebrow="Operations" title="Warehouse fulfillment" />
+        <Panel><div className="inline-error">{ordersState.error}</div></Panel>
+      </div>
+    )
   }
+
+  if (!order) {
+    return (
+      <div className="page-stack">
+        <PageHeader
+          eyebrow="Operations"
+          title="Warehouse fulfillment"
+          description="Approved orders are allocated to the nearest store holding enough stock."
+        />
+        <Panel>
+          <div className="empty-cart">
+            <PackageCheck size={24} />
+            <strong>No approved orders yet</strong>
+            <span>A quotation appears here once it has been approved.</span>
+          </div>
+        </Panel>
+      </div>
+    )
+  }
+
+  const busy = allocating || allocationState.loading
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow="Operations"
         title="Warehouse fulfillment"
-        description={canManage
-          ? 'Allocate approved orders while protecting live stock and the promised delivery date.'
-          : 'Track inventory allocation, shipment groups and the promised delivery date.'}
+        description="Each line is pulled from the nearest store that holds enough sellable stock, so the order ships in as few parcels as possible."
         actions={
           <label className="header-select">
             <span>Order</span>
-            <select value={quoteId} onChange={(event) => selectQuote(event.target.value)}>
-              {eligible.map((item) => <option value={item.id} key={item.id}>{item.id} · {item.customer.name}</option>)}
+            <select value={quoteId} onChange={(event) => selectOrder(event.target.value)}>
+              {orders.map((item) => (
+                <option value={String(item._id)} key={String(item._id)}>
+                  {item.customer?.fullName ?? 'Customer'} · {formatMoney(item.selling_price)}
+                </option>
+              ))}
             </select>
           </label>
         }
       />
 
       <section className="operation-summary">
-        <article><span><Boxes size={17} /></span><div><small>Order value</small><strong>{formatMoney(calculation.total)}</strong></div></article>
-        <article><span><Truck size={17} /></span><div><small>Suggested shipments</small><strong>{shipments.filter((item) => !item.backorder).length}</strong></div></article>
-        <article><span><CircleDollarSign size={17} /></span><div><small>Estimated shipping</small><strong>{formatMoney(shippingCost)}</strong></div></article>
-        <article><span><PackageCheck size={17} /></span><div><small>Backordered units</small><strong>{backordered}</strong></div></article>
+        <article>
+          <span><Boxes size={17} /></span>
+          <div><small>Order value</small><strong>{formatMoney(order.selling_price)}</strong></div>
+        </article>
+        <article>
+          <span><Truck size={17} /></span>
+          <div><small>Shipments</small><strong>{groups.length}</strong></div>
+        </article>
+        <article>
+          <span><Route size={17} /></span>
+          <div>
+            <small>Furthest store</small>
+            <strong>{groups.length ? formatDistance(furthest) : '—'}</strong>
+          </div>
+        </article>
+        <article>
+          <span><PackageX size={17} /></span>
+          <div><small>Unallocated units</small><strong>{pendingUnits}</strong></div>
+        </article>
       </section>
 
-      {backorderReady && canManage && (
+      {shortage && (
         <section className="backorder-callout">
           <span><RefreshCcw size={19} /></span>
-          <div><strong>New inventory can reduce this order to two shipments.</strong><p>Six ApexBook Pro units arrived at Main Warehouse after the original allocation.</p></div>
-          <button className="button button--secondary" type="button" onClick={consolidateBackorder}>Consolidate remaining backorder</button>
+          <div>
+            <strong>No single store can cover every line.</strong>
+            <p>
+              {shortage.details?.requested_inv
+                ? `${shortage.details.requested_inv} unit${shortage.details.requested_inv === 1 ? '' : 's'} were requested for one line and no store holds that much sellable stock.`
+                : shortage.message}{' '}
+              Add inventory from the back-end, then run the allocation again to
+              consolidate the remaining lines.
+            </p>
+          </div>
+          <button className="button button--secondary" type="button" onClick={acceptSuggestedSplit} disabled={busy}>
+            Retry allocation
+          </button>
         </section>
       )}
 
       <div className="fulfillment-layout">
         <div className="fulfillment-main">
           <Panel
-            title="Recommended split"
-            description="Optimized using stock availability, service level and shipping cost weighting."
-            action={<span className="recommendation-chip"><Route size={14} /> Best route</span>}
+            title="Shipment plan"
+            description="One group per store. Lines from the same store travel together."
+            action={groups.length ? <span className="recommendation-chip"><Route size={14} /> Nearest eligible store</span> : null}
           >
-            <div className="shipment-list">
-              {shipments.map((shipment, shipmentIndex) => (
-                <article className={`shipment-card ${shipment.backorder ? 'shipment-card--backorder' : ''}`} key={shipment.warehouseId}>
-                  <header>
-                    <span className="shipment-number">{shipment.backorder ? '!' : shipmentIndex + 1}</span>
-                    <div><strong>{shipment.warehouse}</strong><small><MapPin size={12} /> {shipment.city} · {shipment.serviceLevel}</small></div>
-                    <span><small>Shipment cost</small><strong>{formatMoney(shipment.cost)}</strong></span>
-                  </header>
-                  <div className="shipment-lines">
-                    {shipment.lines.map((line, lineIndex) => (
-                      <div key={`${shipment.warehouseId}-${line.productId}`}>
-                        <span><strong>{line.name}</strong><small>Reserved from live stock</small></span>
-                        {manual && canManage ? <input type="number" min="0" value={line.quantity} onChange={(event) => adjustQuantity(shipmentIndex, lineIndex, event.target.value)} /> : <strong>{line.quantity} units</strong>}
+            {allocationState.loading ? (
+              <p className="empty-copy empty-copy--large">Loading allocation…</p>
+            ) : allocationState.error ? (
+              <div className="inline-error">{allocationState.error}</div>
+            ) : (
+              <div className="shipment-list">
+                {groups.map((group, index) => (
+                  <article className="shipment-card" key={group.storeId}>
+                    <header>
+                      <span className="shipment-number">{index + 1}</span>
+                      <div>
+                        <strong>{group.name}</strong>
+                        <small><MapPin size={12} /> {formatDistance(group.distanceMetres)}</small>
                       </div>
-                    ))}
+                      <span>
+                        <small>Units</small>
+                        <strong>{group.units}</strong>
+                      </span>
+                    </header>
+                    <div className="shipment-lines">
+                      {group.lines.map((line) => (
+                        <div key={line.id}>
+                          <span>
+                            <strong>{line.sku}</strong>
+                            <small>{line.sellable} sellable at this store</small>
+                          </span>
+                          <strong>{line.quantity} units</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+
+                {pending.length > 0 && (
+                  <article className="shipment-card shipment-card--backorder">
+                    <header>
+                      <span className="shipment-number">!</span>
+                      <div>
+                        <strong>Awaiting allocation</strong>
+                        <small><AlertTriangle size={12} /> No store assigned yet</small>
+                      </div>
+                      <span>
+                        <small>Units</small>
+                        <strong>{pendingUnits}</strong>
+                      </span>
+                    </header>
+                    <div className="shipment-lines">
+                      {pending.map((line) => (
+                        <div key={line.id}>
+                          <span>
+                            <strong>{line.sku}</strong>
+                            <small>{line.sellable} sellable on the quoted article</small>
+                          </span>
+                          <strong>{line.quantity} units</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                )}
+
+                {!groups.length && !pending.length && (
+                  <div className="empty-cart">
+                    <PackageCheck size={24} />
+                    <strong>Nothing to ship</strong>
+                    <span>This order has no physical lines. Subscriptions are not allocated to a store.</span>
                   </div>
-                </article>
-              ))}
-            </div>
+                )}
+              </div>
+            )}
           </Panel>
         </div>
 
         <aside className="fulfillment-aside">
-          <Panel title={canManage ? 'Allocation decision' : 'Allocation status'} description={canManage ? 'Review before reserving inventory.' : 'Finance owns inventory reservation and allocation changes.'}>
+          <Panel title="Allocation" description="Accepting reserves each line against the chosen store.">
             <dl className="allocation-summary">
-              <div><dt>Warehouses used</dt><dd>{shipments.filter((item) => !item.backorder).length}</dd></div>
-              <div><dt>Available now</dt><dd>{backordered ? `${backordered} short` : '100%'}</dd></div>
-              <div><dt>Delivery promise</dt><dd><span className="text-success">Protected</span></dd></div>
-              <div><dt>Quote status</dt><dd><StatusBadge status={quote.stage} /></dd></div>
+              <div><dt>Stores used</dt><dd>{groups.length}</dd></div>
+              <div><dt>Units allocated</dt><dd>{allocatedUnits}</dd></div>
+              <div>
+                <dt>Coverage</dt>
+                <dd className={pendingUnits ? 'text-danger' : 'text-success'}>
+                  {pendingUnits ? `${pendingUnits} short` : 'Complete'}
+                </dd>
+              </div>
+              <div><dt>Order status</dt><dd><StatusBadge status={order.status} /></dd></div>
             </dl>
-            {canManage ? (
-              <>
-                <button className={`button button--full ${accepted ? 'button--success' : 'button--primary'}`} type="button" onClick={acceptSplit} disabled={accepted}>
-                  {accepted ? <><Check size={16} /> Split accepted</> : <>Accept suggested split <ArrowRight size={15} /></>}
-                </button>
-                <button className="button button--quiet button--full" type="button" onClick={() => setManual((value) => !value)}>
-                  <Settings2 size={15} /> {manual ? 'Use recommendation' : 'Manual override'}
-                </button>
-              </>
-            ) : (
-              <p className="empty-copy">This view is read-only for sales representatives.</p>
+
+            <button
+              className={`button button--full ${pendingUnits ? 'button--primary' : 'button--success'}`}
+              type="button"
+              onClick={acceptSuggestedSplit}
+              disabled={busy || !storeCount}
+            >
+              {allocating
+                ? 'Allocating…'
+                : pendingUnits
+                  ? <>Accept suggested split</>
+                  : <><Check size={16} /> Re-run allocation</>}
+            </button>
+
+            {!storeCount && (
+              <p className="empty-copy">
+                No stores exist yet. An administrator has to create one before an
+                order can be allocated.
+              </p>
             )}
           </Panel>
 
-          <Panel title="Warehouse capacity" description="Current utilization across configured locations.">
-            <div className="capacity-list">
-              {warehouseData.map((warehouse) => (
-                <div key={warehouse.id}>
-                  <span><strong>{warehouse.name}</strong><small>{warehouse.utilization}% used</small></span>
-                  <i><b style={{ width: `${warehouse.utilization}%` }} /></i>
-                </div>
-              ))}
-            </div>
-          </Panel>
         </aside>
       </div>
     </div>

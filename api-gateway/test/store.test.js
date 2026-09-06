@@ -22,7 +22,7 @@ test('admin store creation endpoint is registered', () => {
     .filter((layer) => layer.route?.methods.post)
     .map((layer) => layer.route.path)
 
-  assert.deepEqual(paths, ['/create_store'])
+  assert.deepEqual(paths, ['/create_store', '/store_split'])
 })
 
 test('manual store split endpoint is registered as PATCH', () => {

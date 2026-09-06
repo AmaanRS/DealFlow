@@ -5,6 +5,7 @@ import { asyncRoute } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
 import { logger, requestLogContext, setRequestAttributes } from '../telemetry.js'
 import { callQuoteService } from './quote.js'
+import { assertQuoteVisible } from './quote.js'
 
 const router = Router()
 const storeServiceUrl = config.get('night_sky_url')
@@ -164,6 +165,57 @@ router.patch(
       'Manual store allocation request completed',
       requestLogContext(req, {
         'event.name': 'store.manual_allocation.request.completed',
+        'event.outcome': outcome,
+      }),
+    )
+    res.status(result.status).json(result.data)
+  }),
+)
+
+/**
+ * Recompute and persist the warehouse allocation for a quotation.
+ *
+ * Night Sky picks the nearest store that holds enough sellable inventory for
+ * each physical line and writes `products[].store_id` and
+ * `fulfillment_details` back onto the quote, so this is not a preview: calling
+ * it is the accept. A sales rep may only allocate their own quotation, checked
+ * against Morning Star before the call rather than trusting the request body.
+ */
+router.post(
+  '/store_split',
+  requireRoles(USER_ROLES.ADMIN, USER_ROLES.SALES_REP, USER_ROLES.FINANCE),
+  asyncRoute(async (req, res) => {
+    const quoteId = req.body?.quote_id
+    if (!quoteId || typeof quoteId !== 'string') {
+      res.status(400).json({
+        code: 'INVALID_REQUEST_BODY',
+        message: 'quote_id is required.',
+      })
+      return
+    }
+
+    const owned = await assertQuoteVisible(req, res, quoteId)
+    if (!owned) return
+
+    const result = await callStoreService(req, '/store/store_split', {
+      method: 'POST',
+      body: { quote_id: quoteId },
+    })
+    const outcome = result.status < 400 ? 'success' : 'failure'
+    setRequestAttributes(req, {
+      'event.outcome': outcome,
+      'store.operation': 'split',
+      'store.service.status_code': result.status,
+      'quote.id': quoteId,
+      'store.assignment.count': Array.isArray(result.data.store_split)
+        ? result.data.store_split.length
+        : undefined,
+      ...(outcome === 'failure' ? { 'error.code': result.data.code } : {}),
+    })
+    logger.info(
+      'Store allocation request completed',
+      requestLogContext(req, {
+        'event.name': 'store.split.request.completed',
         'event.outcome': outcome,
       }),
     )

@@ -23,7 +23,7 @@ import {
 
 const router = Router()
 const discountServiceUrl = config.get('night_sky_url')
-const discountManagerRoles = [USER_ROLES.ADMIN, USER_ROLES.MANAGER]
+const discountPolicyRoles = [USER_ROLES.ADMIN]
 
 router.use(asyncRoute(requireInternalAuth))
 
@@ -171,7 +171,7 @@ function logRegistrationReviewFailure(req, requestId, errorCode, outcome) {
 
 router.get(
   '/discount_policy',
-  requireRoles(...discountManagerRoles),
+  requireRoles(...discountPolicyRoles),
   asyncRoute(async (req, res) => {
     const [tierDiscounts, categoryDiscount] = await Promise.all([
       TierDiscount.find().sort({ threshold: 1, tier: 1 }).lean(),
@@ -196,7 +196,7 @@ router.get(
 
 router.post(
   '/create_tier_discount',
-  requireRoles(USER_ROLES.ADMIN, USER_ROLES.MANAGER),
+  requireRoles(...discountPolicyRoles),
   asyncRoute(async (req, res) => {
     const body = parseBody(createTierDiscountSchema, req, res)
     if (!body) return
@@ -262,7 +262,7 @@ router.post(
 
 router.patch(
   '/tier_discount',
-  requireRoles(...discountManagerRoles),
+  requireRoles(...discountPolicyRoles),
   asyncRoute(async (req, res) => {
     const body = parseBody(updateTierDiscountSchema, req, res)
     if (!body) return
@@ -315,7 +315,7 @@ router.patch(
 
 router.post(
   ['/create_category_discount', '/create_category_discount_'],
-  requireRoles(USER_ROLES.ADMIN, USER_ROLES.MANAGER),
+  requireRoles(...discountPolicyRoles),
   asyncRoute(async (req, res) => {
     const body = parseBody(createCategoryDiscountSchema, req, res)
     if (!body) return
@@ -358,7 +358,7 @@ router.post(
 
 router.patch(
   '/category_discount',
-  requireRoles(...discountManagerRoles),
+  requireRoles(...discountPolicyRoles),
   asyncRoute(async (req, res) => {
     const body = parseBody(createCategoryDiscountSchema, req, res)
     if (!body) return

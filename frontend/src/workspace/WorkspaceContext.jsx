@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { quoteApi } from '../api/quoteApi.js'
-import { USER_ROLES } from '../contracts/auth.js'
 import { calculateQuote } from './dealMath.js'
 import { MOVABLE_STAGES } from './quoteStages.js'
 
@@ -34,32 +33,62 @@ function displayCategory(value) {
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
-function approvalStepsFor(quote, user) {
+function approvalStepsFor(quote) {
   if (!['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].includes(quote.status)) {
     return []
   }
 
-  const assignedToCurrentUser = quote.assigned_to === user.email
-  const role = !assignedToCurrentUser
-    ? 'Assigned reviewer'
-    : user.role === USER_ROLES.FINANCE
-      ? 'Finance'
-      : 'Sales manager'
+  if (quote.risk === 'LOW') return []
 
-  return [{
-    id: `approval-${quote._id}`,
-    role,
-    assignee: quote.assigned_to,
-    status:
-      quote.status === 'PENDING_APPROVAL'
-        ? 'PENDING'
-        : quote.status === 'APPROVED'
-          ? 'APPROVED'
-          : 'REJECTED',
-  }]
+  if (quote.risk !== 'HIGH') {
+    return [{
+      id: `approval-manager-${quote._id}`,
+      role: 'Sales manager',
+      assignee: quote.approved_by ?? quote.assigned_to,
+      status:
+        quote.status === 'PENDING_APPROVAL'
+          ? 'PENDING'
+          : quote.status === 'APPROVED'
+            ? 'APPROVED'
+            : 'REJECTED',
+    }]
+  }
+
+  const managerCompleted = Boolean(quote.approved_by)
+  const financeCompleted = quote.status === 'APPROVED'
+  const financeRejected = quote.status === 'REJECTED' && managerCompleted
+
+  return [
+    {
+      id: `approval-manager-${quote._id}`,
+      role: 'Sales manager',
+      assignee: managerCompleted && !financeCompleted
+        ? quote.approved_by
+        : managerCompleted
+          ? 'Completed before Finance review'
+          : quote.assigned_to,
+      status: managerCompleted
+        ? 'APPROVED'
+        : quote.status === 'REJECTED'
+          ? 'REJECTED'
+          : 'PENDING',
+    },
+    {
+      id: `approval-finance-${quote._id}`,
+      role: 'Finance',
+      assignee: managerCompleted ? quote.assigned_to : 'Assigned after manager approval',
+      status: financeCompleted
+        ? 'APPROVED'
+        : financeRejected
+          ? 'REJECTED'
+          : managerCompleted
+            ? 'PENDING'
+            : 'WAITING',
+    },
+  ]
 }
 
-function toWorkspaceQuote(quote, user) {
+function toWorkspaceQuote(quote) {
   const customer = quote.customer && typeof quote.customer === 'object'
     ? quote.customer
     : { _id: quote.customer }
@@ -84,9 +113,9 @@ function toWorkspaceQuote(quote, user) {
       id: String(product._id ?? product.article_id),
       productId: String(product.item_id),
       articleId: String(product.article_id),
-      quantity: product.inv,
-      discount: product.applied_discount,
-      allowedDiscount: product.product_discount,
+      quantity: Math.max(1, Number(product.inv) || 1),
+      discount: Number(product.applied_discount) || 0,
+      allowedDiscount: Number(product.product_discount) || 0,
       product: {
         id: String(product.item_id),
         articleId: String(product.article_id),
@@ -99,12 +128,12 @@ function toWorkspaceQuote(quote, user) {
         unit: 'Unit',
         tax: product.gst,
         stock: null,
-        discountLimit: product.product_discount,
-        categoryDiscount: product.category_discount,
+        discountLimit: Number(product.product_discount) || 0,
+        categoryDiscount: Number(product.category_discount) || 0,
         description: `HSN ${product.hsn}`,
       },
     })),
-    approvalSteps: approvalStepsFor(quote, user),
+    approvalSteps: approvalStepsFor(quote),
     audit: [{
       id: `audit-${quote._id}`,
       actor: quote.approved_by ?? quote.created_by,
@@ -149,7 +178,7 @@ export function WorkspaceProvider({ children, user }) {
     setQuotesError(null)
     try {
       const result = await quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
-      setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+      setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote)))
       setQuotesPage(result.pagination?.page ?? 1)
       setQuotesTotalPages(result.pagination?.total_pages ?? 1)
     } catch (error) {
@@ -158,7 +187,7 @@ export function WorkspaceProvider({ children, user }) {
     } finally {
       setQuotesLoading(false)
     }
-  }, [user])
+  }, [])
 
   /**
    * Append the next page. Locally created drafts have no server id yet, so they
@@ -173,7 +202,7 @@ export function WorkspaceProvider({ children, user }) {
     try {
       const nextPage = quotesPage + 1
       const result = await quoteApi.list({ page: nextPage, limit: QUOTES_PAGE_SIZE })
-      const incoming = (result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user))
+      const incoming = (result.quotes ?? []).map((quote) => toWorkspaceQuote(quote))
       setQuotes((current) => {
         const seen = new Set(current.map((quote) => quote.id))
         return [...current, ...incoming.filter((quote) => !seen.has(quote.id))]
@@ -185,7 +214,7 @@ export function WorkspaceProvider({ children, user }) {
     } finally {
       setQuotesLoadingMore(false)
     }
-  }, [quotesLoading, quotesLoadingMore, quotesPage, quotesTotalPages, user])
+  }, [quotesLoading, quotesLoadingMore, quotesPage, quotesTotalPages])
 
   useEffect(() => {
     let active = true
@@ -193,7 +222,7 @@ export function WorkspaceProvider({ children, user }) {
     quoteApi.list({ page: 1, limit: QUOTES_PAGE_SIZE })
       .then((result) => {
         if (!active) return
-        setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote, user)))
+        setQuotes((result.quotes ?? []).map((quote) => toWorkspaceQuote(quote)))
         setQuotesPage(result.pagination?.page ?? 1)
         setQuotesTotalPages(result.pagination?.total_pages ?? 1)
       })
@@ -207,7 +236,7 @@ export function WorkspaceProvider({ children, user }) {
     return () => {
       active = false
     }
-  }, [user])
+  }, [])
 
   function commit(nextQuotes) {
     setQuotes(nextQuotes)
@@ -308,7 +337,7 @@ export function WorkspaceProvider({ children, user }) {
     const result = quote.serverManaged && quote.stage === 'DRAFT'
       ? await quoteApi.update({ quote_id: quote.id, updates })
       : await quoteApi.create(updates)
-    const persistedQuote = toWorkspaceQuote(result.quote, user)
+    const persistedQuote = toWorkspaceQuote(result.quote)
     setQuotes((current) => [
       persistedQuote,
       ...current.filter(
@@ -353,7 +382,7 @@ export function WorkspaceProvider({ children, user }) {
         quote_id: quoteId,
         updates: { status: nextStage },
       })
-      const persisted = toWorkspaceQuote(result.quote, user)
+      const persisted = toWorkspaceQuote(result.quote)
       // A revision is a new document, so swap the old id out rather than patch it.
       setQuotes((current) => [
         persisted,
@@ -368,47 +397,21 @@ export function WorkspaceProvider({ children, user }) {
     }
   }
 
-  function reviewQuote(quoteId, decision, reason = '') {
-    updateQuote(quoteId, (quote) => {
-      let stage
-      let approvalSteps = quote.approvalSteps
-
-      if (decision === 'APPROVE') {
-        const activeIndex = approvalSteps.findIndex((step) => step.status === 'PENDING')
-        approvalSteps = approvalSteps.map((step, index) => {
-          if (index === activeIndex) return { ...step, status: 'APPROVED' }
-          if (index === activeIndex + 1 && step.status === 'WAITING') {
-            return { ...step, status: 'PENDING' }
-          }
-          return step
-        })
-        stage = approvalSteps.some((step) => step.status === 'PENDING')
-          ? 'PENDING_APPROVAL'
-          : 'APPROVED'
-      } else if (decision === 'REJECT') {
-        stage = 'REJECTED'
-      } else {
-        stage = 'REVISION'
-      }
-
-      return {
-        ...quote,
-        stage,
-        approvalSteps,
-        audit: [
-          createAudit(
-            user.fullName,
-            decision === 'APPROVE'
-              ? 'Approval step completed'
-              : decision === 'REJECT'
-                ? 'Quotation rejected'
-                : 'Returned for revision',
-            reason || 'Decision recorded from the approval workspace.',
-          ),
-          ...quote.audit,
-        ],
-      }
-    })
+  async function reviewQuote(quoteId, decision, reason = '') {
+    const result = await quoteApi.review(
+      {
+        quote_id: quoteId,
+        decision,
+        ...(reason ? { reason } : {}),
+      },
+      user.role,
+    )
+    const persisted = toWorkspaceQuote(result.quote)
+    setQuotes((current) => [
+      persisted,
+      ...current.filter((item) => item.id !== quoteId && item.id !== persisted.id),
+    ])
+    return { quote: persisted, approval: result.approval }
   }
 
   function resetWorkspace() {

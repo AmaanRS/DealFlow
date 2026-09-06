@@ -7,23 +7,26 @@ import {
   Clock3,
   FileClock,
   PackageCheck,
-  Plus,
   Send,
   Sparkles,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { USER_ROLES } from '../../contracts/auth.js'
 import { calculateQuote, formatMoney } from '../dealMath.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
 import { PageHeader, Panel, StatCard } from '../components/Ui.jsx'
 
+/**
+ * Deal-health overview for the sales manager.
+ *
+ * This is a manager-only screen: a sales rep works from the quotation board,
+ * finance from the approval queue, and an administrator from the back-end
+ * configuration screens. Every figure here is derived from live quotations.
+ */
 export default function DashboardPage() {
-  const { quotes, user, createQuote } = useWorkspace()
+  const { quotes, user } = useWorkspace()
   const navigate = useNavigate()
   const savedQuotes = quotes.filter((quote) => !quote.isUnsaved)
-  const isSalesRep = user.role === USER_ROLES.SALES_REP
-  const isManager = user.role === USER_ROLES.MANAGER
   const pending = savedQuotes.filter((quote) => quote.stage === 'PENDING_APPROVAL')
   const pipelineValue = savedQuotes.reduce(
     (sum, quote) => sum + calculateQuote(quote).total,
@@ -44,10 +47,6 @@ export default function DashboardPage() {
       .map((stage) => savedQuotes.filter((quote) => quote.stage === stage).length),
   )
 
-  function newQuote() {
-    navigate(`/quotations/${createQuote()}`)
-  }
-
   function triggerAlertAction(quote, action) {
     toast.success(`${action} sent for ${quote.id}`, {
       description: `${quote.customer.name} was added to the follow-up queue.`,
@@ -57,16 +56,9 @@ export default function DashboardPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={isManager ? 'Deal health' : 'Sales workspace'}
+        eyebrow="Deal health"
         title={`Welcome, ${user.fullName.split(' ')[0]}.`}
-        description={isManager
-            ? 'Review commercial risk, stalled deals and decisions that need your attention.'
-            : 'Build quotations and follow each deal through approval and fulfillment.'}
-        actions={isSalesRep ? (
-          <button type="button" className="button button--primary" onClick={newQuote}>
-            <Plus size={16} /> New quotation
-          </button>
-        ) : null}
+        description="Review commercial risk, stalled deals and decisions that need your attention."
       />
 
       <section className="stats-grid">
@@ -102,25 +94,23 @@ export default function DashboardPage() {
 
       <section className="dashboard-main-grid">
         <Panel
-          title={isManager ? 'Approval queue' : 'Recent quotations'}
-          description={isManager
-            ? 'Deals currently waiting for your pricing decision.'
-            : 'Your latest deals and their next required step.'}
+          title="Approval queue"
+          description="Deals currently waiting for your pricing decision."
           action={
-            <button className="link-button" type="button" onClick={() => navigate(isManager ? '/approvals' : '/quotations')}>
+            <button className="link-button" type="button" onClick={() => navigate('/approvals')}>
               View all <ArrowUpRight size={14} />
             </button>
           }
         >
           <div className="compact-list">
-            {(isManager ? pending : savedQuotes.slice(0, 4)).map((quote) => {
+            {pending.map((quote) => {
               const calculation = calculateQuote(quote)
               return (
                 <button
                   className="compact-row"
                   type="button"
                   key={quote.id}
-                  onClick={() => navigate(isManager ? `/approvals/${quote.id}` : `/quotations/${quote.id}`)}
+                  onClick={() => navigate(`/approvals/${quote.id}`)}
                 >
                   <span className="compact-row__icon"><Clock3 size={16} /></span>
                   <span className="compact-row__copy">
@@ -131,7 +121,7 @@ export default function DashboardPage() {
                 </button>
               )
             })}
-            {!(isManager ? pending : savedQuotes).length && <p className="empty-copy">Nothing needs attention.</p>}
+            {!pending.length && <p className="empty-copy">Nothing needs attention.</p>}
           </div>
         </Panel>
 
@@ -150,8 +140,8 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-          <button className="button button--secondary button--full" type="button" onClick={() => navigate(isManager ? '/approvals' : '/quotations')}>
-            {isManager ? 'Open approval queue' : 'Open the quotation board'}
+          <button className="button button--secondary button--full" type="button" onClick={() => navigate('/approvals')}>
+            Open approval queue
           </button>
         </Panel>
       </section>
@@ -175,7 +165,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     className="alert-row__main"
-                    onClick={() => navigate(isManager ? `/approvals/${quote.id}` : `/quotations/${quote.id}`)}
+                    onClick={() => navigate(`/approvals/${quote.id}`)}
                   >
                     <strong>
                       {delivery
@@ -189,9 +179,9 @@ export default function DashboardPage() {
                   <button
                     className="button button--quiet button--small"
                     type="button"
-                    onClick={() => triggerAlertAction(quote, stalledDeal && !isManager ? 'Nudge' : 'Escalation')}
+                    onClick={() => triggerAlertAction(quote, 'Escalation')}
                   >
-                    <Send size={13} /> {stalledDeal && !isManager ? 'Nudge' : 'Escalate'}
+                    <Send size={13} /> Escalate
                   </button>
                 </article>
               )

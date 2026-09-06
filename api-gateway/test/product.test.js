@@ -14,7 +14,7 @@ test('product read endpoints are registered', () => {
     .filter((layer) => layer.route?.methods.get)
     .map((layer) => layer.route.path)
 
-  assert.deepEqual(paths, ['/get_products', '/:item_id'])
+  assert.deepEqual(paths, ['/get_products', '/get_inv/:quote_id', '/:item_id'])
 })
 
 test('admin product creation endpoints are registered', () => {

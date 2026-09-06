@@ -196,14 +196,23 @@ export function parseProductListQuery(query) {
   const filter = {};
 
   if (query.category) {
-    const category = String(query.category).trim().toUpperCase();
-    if (!ITEM_CATEGORIES.includes(category)) {
+    const categories = String(query.category)
+      .split(",")
+      .map((category) => category.trim().toUpperCase())
+      .filter(Boolean);
+    if (
+      categories.length === 0 ||
+      categories.some((category) => !ITEM_CATEGORIES.includes(category))
+    ) {
       throw Object.assign(
-        new Error(`category must be one of: ${ITEM_CATEGORIES.join(", ")}`),
+        new Error(`category must contain only: ${ITEM_CATEGORIES.join(", ")}`),
         { status: 400, code: "INVALID_CATEGORY" },
       );
     }
-    filter.categories = category;
+    const uniqueCategories = [...new Set(categories)];
+    filter.categories = uniqueCategories.length === 1
+      ? uniqueCategories[0]
+      : { $in: uniqueCategories };
   }
 
   if (query.search) {

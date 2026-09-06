@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import { asyncRoute } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
 import { logger, requestLogContext, setRequestAttributes } from '../telemetry.js'
+import { assertQuoteVisible } from './quote.js'
 
 const router = Router()
 const productServiceUrl = config.get('night_sky_url')
@@ -145,6 +146,30 @@ router.post(
       })
     }
     sendResult(req, res, result, 'add_inventory')
+  }),
+)
+
+/**
+ * Current inventory allocation for one quotation: the article behind each
+ * quoted line, the store it is being pulled from, and the quantity. Scoped the
+ * same way as the quotation itself, so a rep cannot read another rep's order.
+ */
+router.get(
+  '/get_inv/:quote_id',
+  asyncRoute(async (req, res) => {
+    const visible = await assertQuoteVisible(req, res, req.params.quote_id)
+    if (!visible) return
+
+    setRequestAttributes(req, { 'quote.id': req.params.quote_id })
+    sendResult(
+      req,
+      res,
+      await callProductService(
+        req,
+        `/product/get_inv/${encodeURIComponent(req.params.quote_id)}`,
+      ),
+      'quote_inventory',
+    )
   }),
 )
 

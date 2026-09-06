@@ -36,6 +36,19 @@ export const quoteApi = {
     return request(`${QUOTE_BASE_URL}/get_quotes?${query}`)
   },
 
+  /**
+   * Quotations cleared for fulfillment. Morning Star already pins this to
+   * `status: APPROVED` and the latest revision; the gateway additionally scopes
+   * it to the signed-in rep.
+   */
+  listApproved({ page = 1, limit = 100 } = {}) {
+    const query = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    })
+    return request(`${QUOTE_BASE_URL}/approved_quotes?${query}`)
+  },
+
   get(quoteId) {
     return request(`${QUOTE_BASE_URL}/${encodeURIComponent(quoteId)}`)
   },
@@ -50,6 +63,16 @@ export const quoteApi = {
   update(payload) {
     return request(`${QUOTE_BASE_URL}/quotation`, {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  review(payload, reviewerRole) {
+    const approvalBaseUrl = reviewerRole === 'FINANCE'
+      ? '/v1/api/finance'
+      : '/v1/api/manager'
+    return request(`${approvalBaseUrl}/approve_quote`, {
+      method: 'POST',
       body: JSON.stringify(payload),
     })
   },

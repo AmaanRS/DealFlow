@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyCreationRiskWorkflow,
+  applyUpdateRiskWorkflow,
   calculateQuoteRisk,
   rejectedRevisionAsDraft,
 } from "../services/quotePricing.js";
@@ -60,6 +61,31 @@ test("submitted LOW risk auto-approves while MEDIUM waits for approval", () => {
   assert.equal(low.approved_by, "AUTO");
   assert.equal(medium.status, "PENDING_APPROVAL");
   assert.equal(medium.approved_by, null);
+});
+
+test("a HIGH-risk manager approval remains pending for Finance", () => {
+  const result = applyUpdateRiskWorkflow({
+    status: "PENDING_APPROVAL",
+    risk: "HIGH",
+    approved_by: "manager@example.com",
+    assigned_to: "finance@example.com",
+  });
+
+  assert.equal(result.status, "PENDING_APPROVAL");
+  assert.equal(result.approved_by, "manager@example.com");
+  assert.equal(result.assigned_to, "finance@example.com");
+});
+
+test("ordinary pending updates cannot forge approval on a MEDIUM-risk quote", () => {
+  const result = applyUpdateRiskWorkflow({
+    status: "PENDING_APPROVAL",
+    risk: "MEDIUM",
+    approved_by: "forged@example.com",
+    assigned_to: "manager@example.com",
+  });
+
+  assert.equal(result.status, "PENDING_APPROVAL");
+  assert.equal(result.approved_by, null);
 });
 
 test("line-item discount rule raises risk to MEDIUM", () => {

@@ -52,8 +52,11 @@ export function flattenProducts(items) {
 }
 
 export const productApi = {
-  async list({ limit = 100, category, search } = {}) {
-    const query = new URLSearchParams({ limit: String(limit) })
+  async list({ page = 1, limit = 100, category, search } = {}) {
+    const query = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    })
     if (category) query.set('category', category)
     if (search) query.set('search', search)
     const result = await request(`${PRODUCT_BASE_URL}/get_products?${query}`)
@@ -82,5 +85,20 @@ export const productApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+
+  /**
+   * Where each quoted line is currently being pulled from. Returns the article
+   * behind the line with its populated store and the quoted quantity, which is
+   * what the fulfillment screen groups into shipments.
+   */
+  quoteInventory(quoteId, { page = 1, limit = 100 } = {}) {
+    const query = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    })
+    return request(
+      `${PRODUCT_BASE_URL}/get_inv/${encodeURIComponent(quoteId)}?${query}`,
+    )
   },
 }

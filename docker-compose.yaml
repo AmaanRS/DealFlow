@@ -96,6 +96,11 @@ services:
     restart: unless-stopped
     environment:
       VITE_USE_MOCK_AUTH: "false"
+      # The browser reaches this dev server through APISIX, so the hot-reload
+      # socket has to be opened against the gateway rather than 5173.
+      VITE_HMR_CLIENT_PORT: "9080"
+      VITE_HMR_HOST: "localhost"
+      VITE_HMR_PROTOCOL: "ws"
     volumes:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules

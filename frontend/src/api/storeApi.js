@@ -15,6 +15,9 @@ async function request(path, options = {}) {
     const error = new Error(data?.message ?? 'Stores could not be loaded.')
     error.status = response.status
     error.code = data?.code ?? 'STORE_REQUEST_FAILED'
+    // NO_ELIGIBLE_STORE carries the offending article and requested quantity on
+    // the body, which the fulfillment screen shows in the shortage callout.
+    error.details = data ?? {}
     throw error
   }
   return data
@@ -30,6 +33,18 @@ export const storeApi = {
     return request(`${STORE_BASE_URL}/create_store`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  },
+
+  /**
+   * Allocate the quotation's physical lines to the nearest store holding enough
+   * sellable stock. This writes the allocation onto the quote, so it is both the
+   * suggestion and the acceptance. Resolves to `{ quote, store_split }`.
+   */
+  split(quoteId) {
+    return request(`${STORE_BASE_URL}/store_split`, {
+      method: 'POST',
+      body: JSON.stringify({ quote_id: quoteId }),
     })
   },
 }

@@ -383,13 +383,14 @@ export const mockAuthApi = {
     return { user: registrationUser(user) }
   },
 
-  async createTierDiscount({ tier, discount }) {
+  async createTierDiscount({ tier, discount, threshold = 0 }) {
     await wait()
     const now = new Date().toISOString()
     const tierDiscount = {
       id: createId('tier'),
       tier,
       discount,
+      threshold,
       createdAt: now,
       updatedAt: now,
     }
@@ -405,15 +406,29 @@ export const mockAuthApi = {
     }
   },
 
-  async updateTierDiscount({ tier, discount }) {
+  async updateTierDiscount({ tier, discount, threshold }) {
     await wait()
     const existing = mockTierDiscounts.find(
       (item) => item.tier.toUpperCase() === tier.toUpperCase(),
     )
     const now = new Date().toISOString()
+    // The real PATCH treats both fields as optional, so an omitted value keeps
+    // whatever is already stored.
     const tierDiscount = existing
-      ? { ...existing, discount, updatedAt: now }
-      : { id: createId('tier'), tier, discount, createdAt: now, updatedAt: now }
+      ? {
+          ...existing,
+          discount: discount ?? existing.discount,
+          threshold: threshold ?? existing.threshold ?? 0,
+          updatedAt: now,
+        }
+      : {
+          id: createId('tier'),
+          tier,
+          discount: discount ?? 0,
+          threshold: threshold ?? 0,
+          createdAt: now,
+          updatedAt: now,
+        }
     mockTierDiscounts = [
       ...mockTierDiscounts.filter((item) => item.id !== tierDiscount.id),
       tierDiscount,
@@ -474,6 +489,127 @@ export const mockAuthApi = {
   },
 }
 
+let mockPortalQuotation = {
+  id: 'quote_acme_demo',
+  reference: 'Q-2026-0042',
+  status: 'APPROVED',
+  customer: {
+    name: 'Acme Corporation',
+    email: 'procurement@acme.example',
+    tier: 'GOLD',
+  },
+  salesContact: 'rep@dealflow360.local',
+  lines: [
+    {
+      id: 'line-laptop',
+      articleId: 'article-laptop',
+      name: 'Laptop Pro 14',
+      sku: '84713010',
+      category: 'HARDWARE',
+      quantity: 2,
+      unitPrice: 1200,
+      discount: 12,
+      tax: 18,
+      subtotal: 2400,
+      discountedTotal: 1795.2,
+      total: 2118.34,
+    },
+    {
+      id: 'line-service',
+      articleId: 'article-service',
+      name: 'Onsite Setup Service',
+      sku: '998313',
+      category: 'SERVICES',
+      quantity: 1,
+      unitPrice: 450,
+      discount: 8,
+      tax: 18,
+      subtotal: 450,
+      discountedTotal: 351.9,
+      total: 415.24,
+    },
+  ],
+  pricing: {
+    subtotal: 2850,
+    discountedSubtotal: 2147.1,
+    discount: 702.9,
+    tax: 386.48,
+    total: 2533.58,
+    tierDiscount: 15,
+    orderDiscount: 0,
+    taxIncluded: true,
+  },
+  revision: { version: 1, negotiationId: 'demo-negotiation' },
+  latestRequest: null,
+  createdAt: '2026-09-05T09:00:00.000Z',
+  updatedAt: '2026-09-05T09:00:00.000Z',
+  capabilities: { canNegotiate: true, canConfirm: true },
+}
+
+let mockPortalHistory = [{
+  quoteId: mockPortalQuotation.id,
+  version: 1,
+  status: mockPortalQuotation.status,
+  total: mockPortalQuotation.pricing.total,
+  risk: 'LOW',
+  isLatest: true,
+  createdAt: mockPortalQuotation.createdAt,
+}]
+
+function requireMockPortalSession() {
+  if (!activePortalSession) {
+    throw apiError(
+      401,
+      'PORTAL_AUTHENTICATION_REQUIRED',
+      'Open the secure quotation link to continue.',
+    )
+  }
+}
+
+function mockQuoteSummary(quotation) {
+  return {
+    id: quotation.id,
+    reference: quotation.reference,
+    status: quotation.status,
+    lineCount: quotation.lines.length,
+    total: quotation.pricing.total,
+    revision: quotation.revision,
+    salesContact: quotation.salesContact,
+    createdAt: quotation.createdAt,
+    updatedAt: quotation.updatedAt,
+  }
+}
+
+function createMockRevision(status, latestRequest = null) {
+  const submittedAt = new Date().toISOString()
+  const version = mockPortalQuotation.revision.version + 1
+  const quotation = {
+    ...mockPortalQuotation,
+    id: `quote_acme_demo_r${version}`,
+    status,
+    updatedAt: submittedAt,
+    revision: { ...mockPortalQuotation.revision, version },
+    latestRequest,
+    capabilities: status === 'COMPLETED'
+      ? { canNegotiate: false, canConfirm: false }
+      : { canNegotiate: true, canConfirm: true },
+  }
+  mockPortalHistory = [
+    {
+      quoteId: quotation.id,
+      version,
+      status,
+      total: quotation.pricing.total,
+      risk: 'LOW',
+      isLatest: true,
+      createdAt: submittedAt,
+    },
+    ...mockPortalHistory.map((revision) => ({ ...revision, isLatest: false })),
+  ]
+  mockPortalQuotation = quotation
+  return quotation
+}
+
 export const mockPortalApi = {
   async exchangeAccessToken(accessToken) {
     await wait()
@@ -505,5 +641,58 @@ export const mockPortalApi = {
   async logout() {
     await wait()
     activePortalSession = null
+  },
+
+  async listQuotations() {
+    await wait()
+    requireMockPortalSession()
+    return {
+      quotations: [mockQuoteSummary(mockPortalQuotation)],
+      pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+    }
+  },
+
+  async getQuotation(quotationId) {
+    await wait()
+    requireMockPortalSession()
+    if (quotationId && quotationId !== mockPortalQuotation.id) {
+      throw apiError(409, 'QUOTE_VERSION_CONFLICT', 'A newer revision exists. Refresh your quotations and try again.')
+    }
+    return { quotation: mockPortalQuotation }
+  },
+
+  async getQuotationHistory(quotationId) {
+    await wait()
+    requireMockPortalSession()
+    if (quotationId !== mockPortalQuotation.id) {
+      throw apiError(409, 'QUOTE_VERSION_CONFLICT', 'A newer revision exists. Refresh your quotations and try again.')
+    }
+    return {
+      negotiationId: mockPortalQuotation.revision.negotiationId,
+      revisions: mockPortalHistory,
+    }
+  },
+
+  async submitNegotiation(payload) {
+    await wait()
+    requireMockPortalSession()
+    if (payload.quotationId !== mockPortalQuotation.id) {
+      throw apiError(409, 'QUOTE_VERSION_CONFLICT', 'A newer revision exists. Refresh your quotations and try again.')
+    }
+    const submittedAt = new Date().toISOString()
+    const quotation = createMockRevision(
+      'NEGOTIATION',
+      { ...payload, submittedAt },
+    )
+    return { quotation }
+  },
+
+  async confirmQuotation(quotationId) {
+    await wait()
+    requireMockPortalSession()
+    if (quotationId !== mockPortalQuotation.id) {
+      throw apiError(409, 'QUOTE_VERSION_CONFLICT', 'A newer revision exists. Refresh your quotations and try again.')
+    }
+    return { quotation: createMockRevision('COMPLETED') }
   },
 }

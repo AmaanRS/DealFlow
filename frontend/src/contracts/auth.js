@@ -63,9 +63,14 @@ export const AUTH_ENDPOINTS = Object.freeze({
   updateCategoryDiscount: '/v1/api/admin/category_discount',
   riskData: '/v1/api/admin/risks_data',
   configureRisk: '/v1/api/admin/configure_risk',
-  portalSession: '/api/v1/portal/session',
-  portalLogout: '/api/v1/portal/logout',
-  portalInvitations: '/api/v1/portal/invitations',
+  portalSession: '/v1/api/portal/session',
+  portalLogout: '/v1/api/portal/logout',
+  portalInvitations: '/v1/api/portal/invitations',
+  portalQuotations: '/v1/api/portal/quotations',
+  portalQuotation: '/v1/api/portal/quotation',
+  portalQuotationHistory: '/v1/api/portal/quotation-history',
+  portalNegotiations: '/v1/api/portal/negotiations',
+  portalConfirm: '/v1/api/portal/confirm',
 })
 
 export function getRoleLabel(role) {

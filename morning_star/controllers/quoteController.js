@@ -13,7 +13,7 @@ import {
 } from "../models.js";
 import {
   applyCreationRiskWorkflow,
-  normalizeQuoteInput,
+  applyUpdateRiskWorkflow,
   QUOTE_INPUT_FIELDS,
   priceQuotation,
   quoteIntentFromSnapshot,
@@ -566,9 +566,20 @@ async function sendQuoteList(res, filter, pagination) {
     Quote.countDocuments(filter),
   ]);
   const currentQuotes = await useLatestQuoteReportingHsns(quotes);
+  const revisions = await QuoteRevisionHistory.find({
+    quote_id: { $in: quotes.map((quote) => quote._id) },
+  })
+    .select("quote_id quote_version negotiation_id")
+    .lean();
+  const revisionByQuoteId = new Map(
+    revisions.map((revision) => [String(revision.quote_id), revision]),
+  );
 
   res.json({
-    quotes: currentQuotes,
+    quotes: currentQuotes.map((quote) => ({
+      ...quote,
+      revision: revisionByQuoteId.get(String(quote._id)) ?? null,
+    })),
     pagination: {
       page,
       limit,
@@ -651,6 +662,49 @@ export async function getQuote(req, res) {
   }
 
   res.json({ quote, revision });
+}
+
+export async function getQuoteHistory(req, res) {
+  requireDatabase();
+
+  if (!mongoose.isObjectIdOrHexString(req.params.quote_id)) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_ID",
+      "quote_id must be a valid MongoDB ObjectId",
+    );
+  }
+
+  const currentRevision = await revisionForQuote(req.params.quote_id);
+  if (!currentRevision) {
+    throw new ApiError(
+      404,
+      "QUOTE_REVISION_MISSING",
+      "Quotation revision history was not found",
+    );
+  }
+
+  const revisions = await QuoteRevisionHistory.find({
+    negotiation_id: currentRevision.negotiation_id,
+  })
+    .sort({ quote_version: -1 })
+    .lean();
+  const quoteIds = revisions.map((revision) => revision.quote_id);
+  const quotes = await Quote.find({ _id: { $in: quoteIds } })
+    .select("status selling_price risk is_latest_quote createdAt updatedAt")
+    .lean();
+  const quoteById = new Map(
+    quotes.map((quote) => [String(quote._id), quote]),
+  );
+
+  res.json({
+    negotiation_id: currentRevision.negotiation_id,
+    revisions: revisions.map((revision) => ({
+      quote_version: revision.quote_version,
+      quote: quoteById.get(String(revision.quote_id)) ?? null,
+      createdAt: revision.createdAt,
+    })),
+  });
 }
 
 export async function createQuotation(req, res) {
@@ -861,11 +915,7 @@ export async function updateQuotation(req, res) {
     risk_evaluation: riskEvaluation,
     ...pricedNextValues
   } = await priceQuotation(nextIntent, { inventoryCredits });
-  const nextValues = ["DRAFT", "PENDING_APPROVAL"].includes(
-    nextIntent.status,
-  )
-    ? applyCreationRiskWorkflow(pricedNextValues)
-    : normalizeQuoteInput(pricedNextValues);
+  const nextValues = applyUpdateRiskWorkflow(pricedNextValues);
 
   const acquired = await Quote.updateOne(
     { _id: currentQuote._id, is_latest_quote: true },
