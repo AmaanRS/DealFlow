@@ -199,6 +199,16 @@ export function WorkspaceProvider({ children, user }) {
     }
   }, [quotesSearch])
 
+  const loadQuote = useCallback(async (quoteId) => {
+    const result = await quoteApi.get(quoteId)
+    const loadedQuote = toWorkspaceQuote(result.quote)
+    setQuotes((current) => [
+      loadedQuote,
+      ...current.filter((quote) => quote.id !== loadedQuote.id),
+    ])
+    return loadedQuote
+  }, [])
+
   /**
    * Append the next page. Locally created drafts have no server id yet, so they
    * are preserved across appends, and any quote the page returns that is already
@@ -454,6 +464,7 @@ export function WorkspaceProvider({ children, user }) {
     setQuotesSearch,
     hasMoreQuotes,
     loadMoreQuotes,
+    loadQuote,
     refreshQuotes,
     moveQuote,
     updateQuote,
