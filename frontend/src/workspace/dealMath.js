@@ -70,16 +70,21 @@ export function calculateQuote(quote, pricingPolicy = null) {
       for (const discount of [
         categoryDiscount,
         line.discount,
-        tierDiscount,
-        quote.orderDiscount,
       ]) {
         net = applyDiscount(net, discount)
       }
-      const discount = gross > 0 ? ((gross - net) / gross) * 100 : 0
+      let finalNet = net
+      for (const discount of [tierDiscount, quote.orderDiscount]) {
+        finalNet = applyDiscount(finalNet, discount)
+      }
+      const effectiveDiscount = gross > 0 ? ((gross - net) / gross) * 100 : 0
+      const totalEffectiveDiscount = gross > 0
+        ? ((gross - finalNet) / gross) * 100
+        : 0
       const cost = Number.isFinite(product.cost)
         ? product.cost * line.quantity
         : null
-      const marginValue = cost === null ? null : net - cost
+      const marginValue = cost === null ? null : finalNet - cost
       const allowedDiscount = Number.isFinite(product.discountLimit)
         ? product.discountLimit
         : 0
@@ -89,12 +94,18 @@ export function calculateQuote(quote, pricingPolicy = null) {
         ...line,
         product,
         gross,
-        discount,
+        effectiveDiscount,
+        totalEffectiveDiscount,
         net,
+        finalNet,
         cost,
         marginValue,
         marginPercent:
-          marginValue === null ? null : net ? (marginValue / net) * 100 : 0,
+          marginValue === null
+            ? null
+            : finalNet
+              ? (marginValue / finalNet) * 100
+              : 0,
         categoryDiscount,
         tierDiscount,
         allowedDiscount,
@@ -104,7 +115,8 @@ export function calculateQuote(quote, pricingPolicy = null) {
     .filter(Boolean)
 
   const gross = enrichedLines.reduce((sum, line) => sum + line.gross, 0)
-  const total = enrichedLines.reduce((sum, line) => sum + line.net, 0)
+  const subtotal = enrichedLines.reduce((sum, line) => sum + line.net, 0)
+  const total = enrichedLines.reduce((sum, line) => sum + line.finalNet, 0)
   const cost = enrichedLines.every((line) => line.cost !== null)
     ? enrichedLines.reduce((sum, line) => sum + line.cost, 0)
     : null
@@ -144,6 +156,7 @@ export function calculateQuote(quote, pricingPolicy = null) {
   const calculated = {
     lines: enrichedLines,
     gross,
+    subtotal,
     total,
     cost,
     discountValue,
@@ -208,7 +221,7 @@ export function getRecurringSchedule(quote) {
         month: 'short',
         year: 'numeric',
       }).format(date),
-      amount: recurring.reduce((sum, line) => sum + line.net, 0),
+      amount: recurring.reduce((sum, line) => sum + line.finalNet, 0),
       status: index === 0 ? 'DUE' : 'SCHEDULED',
     }
   })

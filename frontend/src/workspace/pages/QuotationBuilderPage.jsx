@@ -131,7 +131,8 @@ export default function QuotationBuilderPage() {
     updateLine,
     removeLine,
     submitQuote,
-    refreshQuotes,
+    quotesLoading,
+    loadQuote,
   } = useWorkspace()
   const quote = quotes.find((item) => item.id === quoteId)
   const editable = Boolean(quote && (quote.isUnsaved || quote.stage === 'DRAFT'))
@@ -150,10 +151,44 @@ export default function QuotationBuilderPage() {
   const [catalogueLoading, setCatalogueLoading] = useState(editable)
   const [catalogueError, setCatalogueError] = useState(null)
   const [saving, setSaving] = useState(null)
+  const [quoteLookup, setQuoteLookup] = useState({
+    quoteId: null,
+    loading: false,
+    error: null,
+  })
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
   }, [quoteId])
+
+  useEffect(() => {
+    if (
+      !quoteId ||
+      quote ||
+      quotesLoading ||
+      quoteLookup.quoteId === quoteId
+    ) {
+      return undefined
+    }
+
+    let active = true
+    Promise.resolve()
+      .then(() => {
+        if (!active) return null
+        setQuoteLookup({ quoteId, loading: true, error: null })
+        return loadQuote(quoteId)
+      })
+      .then(() => {
+        if (active) setQuoteLookup({ quoteId, loading: false, error: null })
+      })
+      .catch((error) => {
+        if (active) setQuoteLookup({ quoteId, loading: false, error })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [loadQuote, quote, quoteId, quoteLookup.quoteId, quotesLoading])
 
   useEffect(() => {
     if (!editable) return undefined
@@ -251,11 +286,43 @@ export default function QuotationBuilderPage() {
     setCategory(next)
   }
 
+  async function refreshCurrentQuote() {
+    try {
+      await loadQuote(quote.id)
+      toast.success('Quotation refreshed.')
+    } catch (error) {
+      toast.error(error.message || 'Quotation could not be refreshed.')
+    }
+  }
+
+  const quoteIsLoading = !quote && (
+    quotesLoading ||
+    quoteLookup.loading ||
+    quoteLookup.quoteId !== quoteId
+  )
+
+  if (quoteIsLoading) {
+    return (
+      <div className="missing-state">
+        <span className="spinner" />
+        <h1>Loading quotation…</h1>
+      </div>
+    )
+  }
+
   if (!quote || !calculation) {
     return (
       <div className="missing-state">
         <AlertTriangle size={28} />
-        <h1>Quotation not found</h1>
+        <h1>{quoteLookup.error?.code === 'QUOTE_NOT_FOUND' ? 'Quotation not found' : 'Could not load quotation'}</h1>
+        {quoteLookup.error && <p>{quoteLookup.error.message}</p>}
+        <button
+          className="button button--secondary"
+          type="button"
+          onClick={() => setQuoteLookup({ quoteId: null, loading: false, error: null })}
+        >
+          Retry
+        </button>
         <button className="button button--primary" type="button" onClick={() => navigate('/quotations')}>Back to quotations</button>
       </div>
     )
@@ -327,7 +394,7 @@ export default function QuotationBuilderPage() {
           <p>Configure customer pricing, validate discounts live and route the quotation correctly.</p>
         </div>
         {!editable && (
-          <button className="button button--quiet" type="button" onClick={refreshQuotes}>Refresh quotation</button>
+          <button className="button button--quiet" type="button" onClick={refreshCurrentQuote}>Refresh quotation</button>
         )}
       </header>
 
@@ -499,7 +566,7 @@ export default function QuotationBuilderPage() {
             <p>Totals and approval routing update as you edit.</p>
           </header>
           <dl className="quote-summary-list">
-            <div><dt>Subtotal</dt><dd>{formatMoney(calculation.gross)}</dd></div>
+            <div><dt>Subtotal</dt><dd>{formatMoney(calculation.subtotal)}</dd></div>
             <div><dt>Customer tier</dt><dd>{quote.customer.tier || 'Not selected'}</dd></div>
             <div><dt>Tier discount</dt><dd>{formatPercentage(calculation.tierDiscount)}</dd></div>
             <div className="quote-order-discount">
