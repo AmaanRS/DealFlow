@@ -30,7 +30,22 @@ router.use(asyncRoute(requireInternalAuth))
 const createTierDiscountSchema = z.object({
   tier: z.string().trim().min(1).max(100),
   discount: z.number().int().min(0).max(100),
+  threshold: z.number().min(0).optional().default(0),
 }).strict()
+
+const updateTierDiscountSchema = z
+  .object({
+    tier: z.string().trim().min(1).max(100),
+    discount: z.number().int().min(0).max(100).optional(),
+    threshold: z.number().min(0).optional(),
+  })
+  .strict()
+  .refine(
+    (body) => body.discount !== undefined || body.threshold !== undefined,
+    {
+      message: 'discount or threshold must be provided.',
+    },
+  )
 
 const createCategoryDiscountSchema = z.object({
   hardware: z.number().min(0).max(100).optional().default(0),
@@ -57,6 +72,7 @@ function publicTierDiscount(discount) {
     id: String(discount._id),
     tier: discount.tier,
     discount: discount.discount,
+    threshold: discount.threshold,
     createdAt: discount.createdAt,
     updatedAt: discount.updatedAt,
   }
@@ -158,7 +174,7 @@ router.get(
   requireRoles(...discountManagerRoles),
   asyncRoute(async (req, res) => {
     const [tierDiscounts, categoryDiscount] = await Promise.all([
-      TierDiscount.find().sort({ discount: 1, tier: 1 }).lean(),
+      TierDiscount.find().sort({ threshold: 1, tier: 1 }).lean(),
       CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
     ])
 
@@ -195,6 +211,7 @@ router.post(
           tierDiscountId: String(discount._id),
           tier: discount.tier,
           discount: discount.discount,
+          threshold: discount.threshold,
         },
       })
 
@@ -204,6 +221,7 @@ router.post(
         'discount.id': String(discount._id),
         'discount.tier': discount.tier,
         'discount.value': discount.discount,
+        'tier.threshold': discount.threshold,
         'discount.outcome': 'created',
       })
       logger.info(
@@ -246,7 +264,7 @@ router.patch(
   '/tier_discount',
   requireRoles(...discountManagerRoles),
   asyncRoute(async (req, res) => {
-    const body = parseBody(createTierDiscountSchema, req, res)
+    const body = parseBody(updateTierDiscountSchema, req, res)
     if (!body) return
 
     const result = await callDiscountService(req, '/tier/tier_discount', body)
@@ -270,6 +288,7 @@ router.patch(
         tierDiscountId: String(discount._id),
         tier: discount.tier,
         discount: discount.discount,
+        threshold: discount.threshold,
       },
     })
 
@@ -279,6 +298,7 @@ router.patch(
       'discount.id': String(discount._id),
       'discount.tier': discount.tier,
       'discount.value': discount.discount,
+      'tier.threshold': discount.threshold,
       'discount.outcome': 'updated',
     })
     logger.info(

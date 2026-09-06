@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { createLogger } from "@app/observability";
+import { promoteCustomerTier } from "@app/models/auth";
 import { Article } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
@@ -449,11 +450,45 @@ async function advanceApprovedSubscriptionQuote(quote) {
   }
 }
 
+async function applyCompletedQuoteToCustomer(quote) {
+  if (
+    quote.status !== "COMPLETED" ||
+    quote.customer_total_price_applied === true
+  ) {
+    return null;
+  }
+
+  const creditedQuote = await Quote.findOneAndUpdate(
+    {
+      _id: quote._id,
+      status: "COMPLETED",
+      customer_total_price_applied: { $ne: true },
+    },
+    { $set: { customer_total_price_applied: true } },
+    { returnDocument: "after" },
+  );
+
+  if (!creditedQuote) return null;
+
+  try {
+    return await promoteCustomerTier(
+      creditedQuote.customer,
+      creditedQuote.selling_price,
+    );
+  } catch (error) {
+    await Quote.updateOne(
+      { _id: creditedQuote._id, customer_total_price_applied: true },
+      { $set: { customer_total_price_applied: false } },
+    );
+    throw error;
+  }
+}
+
 function quoteQuery(quoteId) {
   return Quote.findById(quoteId)
     .populate({
       path: "customer",
-      select: "fullName email _custom_json.tier",
+      select: "fullName email _custom_json.tier _custom_json.total_price",
     })
     .populate("subscription_details")
     .lean();
@@ -472,7 +507,7 @@ async function sendQuoteList(res, filter, pagination) {
       .limit(limit)
       .populate({
         path: "customer",
-        select: "fullName email _custom_json.tier",
+        select: "fullName email _custom_json.tier _custom_json.total_price",
       })
       .lean(),
     Quote.countDocuments(filter),
@@ -791,9 +826,12 @@ export async function updateQuotation(req, res) {
   let newRevision;
   let workflowResult;
   let releasedInventory = [];
+  let customerTierResult = null;
   try {
     newQuote = await Quote.create({
       ...nextValues,
+      customer_total_price_applied:
+        currentQuote.customer_total_price_applied === true,
       is_latest_quote: true,
     });
     newRevision = await QuoteRevisionHistory.create({
@@ -821,6 +859,15 @@ export async function updateQuotation(req, res) {
     }
 
     const updatedQuote = await quoteQuery(workflowResult.quote._id);
+    customerTierResult = await applyCompletedQuoteToCustomer(
+      workflowResult.quote,
+    );
+    if (customerTierResult && updatedQuote.customer?._custom_json) {
+      updatedQuote.customer._custom_json.tier = customerTierResult.tier;
+      updatedQuote.customer._custom_json.total_price =
+        customerTierResult.total_price;
+      updatedQuote.customer_total_price_applied = true;
+    }
 
     logger.info("Quotation revision created", {
       "event.name": "quote.revision.created",
@@ -848,14 +895,23 @@ export async function updateQuotation(req, res) {
       "quote.price.selling": updatedQuote.selling_price,
       "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
       "billing.final_amount": workflowResult.billing?.final_amt ?? null,
+      "customer.total_price.credited":
+        customerTierResult?.completed_quote_price ?? 0,
+      "customer.total_price": customerTierResult?.total_price,
+      "customer.tier.previous": customerTierResult?.previous_tier,
+      "customer.tier": customerTierResult?.tier,
+      "customer.tier.promoted": customerTierResult?.promoted ?? false,
     });
 
     res.json({
       quote: updatedQuote,
       revision: newRevision.toObject(),
       billing: workflowResult.billing?.toObject() ?? null,
+      customer_tier: customerTierResult,
     });
   } catch (error) {
+    if (customerTierResult) throw error;
+
     if (releasedInventory.length > 0) {
       await restoreReleasedInventory(releasedInventory);
     }

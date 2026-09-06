@@ -162,6 +162,11 @@ const quoteSchema = new Schema(
       default: 'LOW',
       required: true,
     },
+    customer_total_price_applied: {
+      type: Boolean,
+      default: false,
+      required: true,
+    },
     fulfillment_details: {
       type: [fulfillmentDetailSchema],
       default: [],
@@ -499,5 +504,13 @@ async function migrateQuoteRevisionIndexes() {
 export async function initializeQuoteCollections() {
   await migrateQuoteRevisionIndexes()
   await Promise.all(quoteModels.map((model) => model.init()))
+  await User.updateMany(
+    {
+      role: 'CUSTOMER',
+      '_custom_json.total_price': { $exists: false },
+    },
+    { $set: { '_custom_json.total_price': 0 } },
+    { runValidators: true },
+  )
   return quoteModels.map((model) => model.collection.collectionName)
 }

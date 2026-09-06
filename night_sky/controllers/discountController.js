@@ -51,9 +51,11 @@ function isPercentage(value, { integer = false } = {}) {
 
 export async function updateTierDiscount(req, res) {
   if (!requireDatabase(res) || !requireObject(req.body, res)) return;
-  if (rejectUnknownFields(req.body, ["tier", "discount"], res)) return;
+  if (rejectUnknownFields(req.body, ["tier", "discount", "threshold"], res)) {
+    return;
+  }
 
-  const { tier, discount } = req.body;
+  const { tier, discount, threshold } = req.body;
   if (typeof tier !== "string" || tier.trim().length === 0) {
     res.status(400).json({
       code: "INVALID_TIER",
@@ -68,10 +70,36 @@ export async function updateTierDiscount(req, res) {
     });
     return;
   }
-  if (!isPercentage(discount, { integer: true })) {
+  if (
+    discount !== undefined &&
+    !isPercentage(discount, { integer: true })
+  ) {
     res.status(400).json({
       code: "INVALID_DISCOUNT",
       message: "discount must be an integer between 0 and 100",
+    });
+    return;
+  }
+  if (
+    threshold !== undefined &&
+    (typeof threshold !== "number" ||
+      !Number.isFinite(threshold) ||
+      threshold < 0)
+  ) {
+    res.status(400).json({
+      code: "INVALID_THRESHOLD",
+      message: "threshold must be a non-negative number",
+    });
+    return;
+  }
+
+  const updates = {};
+  if (discount !== undefined) updates.discount = discount;
+  if (threshold !== undefined) updates.threshold = threshold;
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({
+      code: "EMPTY_UPDATE",
+      message: "discount or threshold must be provided",
     });
     return;
   }
@@ -79,7 +107,7 @@ export async function updateTierDiscount(req, res) {
   const normalizedTier = tier.trim().toUpperCase();
   const tierDiscount = await TierDiscount.findOneAndUpdate(
     { tier: normalizedTier },
-    { $set: { discount } },
+    { $set: updates },
     { returnDocument: "after", runValidators: true },
   );
 
@@ -98,6 +126,8 @@ export async function updateTierDiscount(req, res) {
     "tier_discount.id": String(tierDiscount._id),
     "customer.tier": tierDiscount.tier,
     "discount.percent": tierDiscount.discount,
+    "tier.threshold": tierDiscount.threshold,
+    "tier.updated_fields": Object.keys(updates),
   });
   res.json({ tier_discount: tierDiscount });
 }

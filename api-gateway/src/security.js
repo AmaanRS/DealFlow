@@ -231,6 +231,7 @@ export function publicUser(user) {
           lat: user._custom_json.lat,
           long: user._custom_json.long,
           tier: user._custom_json.tier,
+          total_price: user._custom_json.total_price,
         }
       : null,
   }

@@ -91,7 +91,7 @@ test('discount policy supports reading, creating, and patching persisted rules',
 
 test('discount updates are forwarded to Night Sky as PATCH requests', async () => {
   let observed
-  const payload = { tier: 'GOLD', discount: 14 }
+  const payload = { tier: 'GOLD', discount: 14, threshold: 50_000 }
   const result = await callDiscountService(
     { requestId: 'request-discount-update' },
     '/tier/tier_discount',
@@ -118,6 +118,7 @@ test('discount updates are forwarded to Night Sky as PATCH requests', async () =
   assert.deepEqual(JSON.parse(observed.options.body), payload)
   assert.equal(result.status, 200)
   assert.equal(result.data.tier_discount.discount, 14)
+  assert.equal(result.data.tier_discount.threshold, 50_000)
 })
 
 test('approval activates the user and persists is_verified true', async () => {

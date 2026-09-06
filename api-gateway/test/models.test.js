@@ -45,6 +45,7 @@ test('new users persist an explicit unverified boolean by default', async () => 
 
   assert.equal(user.is_verified, false)
   assert.equal(user.is_deleted, false)
+  assert.equal(user._custom_json.total_price, 0)
   assert.equal(User.schema.path('is_verified').instance, 'Boolean')
   assert.equal(User.schema.path('is_verified').options.required, true)
   assert.equal(User.schema.path('is_deleted').instance, 'Boolean')
@@ -56,6 +57,10 @@ test('tier discounts must be non-negative integers', async () => {
     new TierDiscount({ tier: 'INVALID', discount: 1.5 }).validate(),
     /discount must be an integer/,
   )
+
+  const tier = new TierDiscount({ tier: 'BRONZE', discount: 0 })
+  await tier.validate()
+  assert.equal(tier.threshold, 0)
 })
 
 test('subscription category discounts remain zero', async () => {
@@ -65,7 +70,7 @@ test('subscription category discounts remain zero', async () => {
   )
 })
 
-test('the lowest-discount tier is assigned when a customer has no tier', async () => {
+test('the lowest-threshold tier is assigned when a customer has no tier', async () => {
   const originalFindOne = TierDiscount.findOne
   TierDiscount.findOne = () => ({
     sort() {

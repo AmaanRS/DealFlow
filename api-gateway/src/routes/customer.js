@@ -36,6 +36,7 @@ export function publicCustomer(user) {
     fullName: user.fullName,
     email: user.email,
     tier: user._custom_json?.tier ?? null,
+    totalPrice: user._custom_json?.total_price ?? 0,
     deliveryAddress: user._custom_json?.delivery_address ?? null,
     location:
       Number.isFinite(user._custom_json?.lat) &&

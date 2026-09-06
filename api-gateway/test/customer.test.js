@@ -25,6 +25,7 @@ test('public customer data excludes authentication fields', () => {
     passwordHash: 'must-not-leak',
     _custom_json: {
       tier: 'BRONZE',
+      total_price: 2500,
       delivery_address: '1 Example Street',
       lat: 19.07,
       long: 72.87,
@@ -33,5 +34,6 @@ test('public customer data excludes authentication fields', () => {
 
   assert.equal(result.id, '507f1f77bcf86cd799439011')
   assert.equal(result.tier, 'BRONZE')
+  assert.equal(result.totalPrice, 2500)
   assert.equal('passwordHash' in result, false)
 })

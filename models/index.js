@@ -21,7 +21,14 @@ export {
   RiskConfiguration,
   effectiveRiskThresholds,
 } from './risk.js'
-export { AuditEvent, PortalInvitation, Session, User } from './auth.js'
+export {
+  AuditEvent,
+  PortalInvitation,
+  Session,
+  User,
+  promoteCustomerTier,
+  selectPromotedTier,
+} from './auth.js'
 export {
   Article,
   Hsn,

@@ -1,9 +1,9 @@
 import mongoose from 'mongoose'
 
 export const DEFAULT_CUSTOMER_TIERS = Object.freeze([
-  Object.freeze({ tier: 'BRONZE', discount: 0 }),
-  Object.freeze({ tier: 'SILVER', discount: 0 }),
-  Object.freeze({ tier: 'GOLD', discount: 0 }),
+  Object.freeze({ tier: 'BRONZE', discount: 0, threshold: 0 }),
+  Object.freeze({ tier: 'SILVER', discount: 0, threshold: 0 }),
+  Object.freeze({ tier: 'GOLD', discount: 0, threshold: 0 }),
 ])
 
 function nonNegativeNumber(defaultValue = 0) {
@@ -67,6 +67,12 @@ const tierDiscountSchema = new mongoose.Schema(
         message: '{PATH} must be an integer',
       },
     },
+    threshold: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
   },
   {
     collection: 'tier_discounts',
@@ -75,7 +81,7 @@ const tierDiscountSchema = new mongoose.Schema(
   },
 )
 
-tierDiscountSchema.index({ discount: 1, tier: 1 })
+tierDiscountSchema.index({ threshold: 1, tier: 1 })
 
 export const CategoryDiscount =
   mongoose.models.CategoryDiscount ??
@@ -86,11 +92,17 @@ export const TierDiscount =
   mongoose.model('TierDiscount', tierDiscountSchema)
 
 export async function ensureDefaultDiscountPolicies() {
+  await TierDiscount.updateMany(
+    { threshold: { $exists: false } },
+    { $set: { threshold: 0 } },
+    { runValidators: true },
+  )
+
   await Promise.all(
-    DEFAULT_CUSTOMER_TIERS.map(({ tier, discount }) =>
+    DEFAULT_CUSTOMER_TIERS.map(({ tier, discount, threshold }) =>
       TierDiscount.updateOne(
         { tier },
-        { $setOnInsert: { tier, discount } },
+        { $setOnInsert: { tier, discount, threshold } },
         { upsert: true, runValidators: true },
       ),
     ),

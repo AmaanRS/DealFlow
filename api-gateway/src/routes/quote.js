@@ -172,7 +172,7 @@ router.get(
   asyncRoute(async (req, res) => {
     const [tierDiscounts, categoryDiscount, riskConfiguration] =
       await Promise.all([
-        TierDiscount.find().sort({ discount: 1, tier: 1 }).lean(),
+        TierDiscount.find().sort({ threshold: 1, tier: 1 }).lean(),
         CategoryDiscount.findOne().sort({ updatedAt: -1, _id: -1 }).lean(),
         RiskConfiguration.findById(RISK_CONFIGURATION_ID).lean(),
       ])
@@ -189,6 +189,7 @@ router.get(
       tier_discounts: tierDiscounts.map((discount) => ({
         tier: discount.tier,
         discount: discount.discount,
+        threshold: discount.threshold,
       })),
       category_discount: categoryDiscount
         ? {

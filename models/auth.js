@@ -49,7 +49,14 @@ const customerCustomJsonSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      uppercase: true,
       maxlength: 100,
+    },
+    total_price: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
     },
   },
   { _id: false },
@@ -142,8 +149,8 @@ userSchema.pre('validate', async function assignCustomerTier() {
   const TierDiscountModel =
     this.constructor.db.models.TierDiscount ??
     this.constructor.db.model('TierDiscount', TierDiscount.schema)
-  const lowestTier = await TierDiscountModel.findOne()
-    .sort({ discount: 1, tier: 1, _id: 1 })
+  const lowestTier = await TierDiscountModel.findOne({ tier: 'BRONZE' })
+    .sort({ threshold: 1, tier: 1, _id: 1 })
     .select('tier')
     .lean()
 
@@ -278,3 +285,167 @@ export const PortalInvitation =
   mongoose.model('PortalInvitation', portalInvitationSchema)
 export const AuditEvent =
   mongoose.models.AuditEvent ?? mongoose.model('AuditEvent', auditEventSchema)
+
+const DEFAULT_TIER_ORDER = new Map([
+  ['BRONZE', 0],
+  ['SILVER', 1],
+  ['GOLD', 2],
+])
+
+function orderedTierPolicies(tierPolicies) {
+  return [...tierPolicies].sort((left, right) => {
+    const leftRank = DEFAULT_TIER_ORDER.get(left.tier) ?? Number.MAX_SAFE_INTEGER
+    const rightRank =
+      DEFAULT_TIER_ORDER.get(right.tier) ?? Number.MAX_SAFE_INTEGER
+    if (leftRank !== rightRank) return leftRank - rightRank
+
+    const thresholdDifference = left.threshold - right.threshold
+    if (thresholdDifference !== 0) return thresholdDifference
+    return left.tier.localeCompare(right.tier)
+  })
+}
+
+export function selectPromotedTier(
+  tierPolicies,
+  totalPrice,
+  currentTier,
+) {
+  const orderedTiers = orderedTierPolicies(tierPolicies)
+  const currentTierIndex = orderedTiers.findIndex(
+    ({ tier }) => tier === currentTier,
+  )
+  let promotedTierIndex = currentTierIndex
+
+  for (let index = 0; index < orderedTiers.length; index += 1) {
+    if (totalPrice > orderedTiers[index].threshold) {
+      promotedTierIndex = Math.max(promotedTierIndex, index)
+    }
+  }
+
+  return promotedTierIndex >= 0
+    ? orderedTiers[promotedTierIndex].tier
+    : currentTier
+}
+
+export async function promoteCustomerTier(customerId, completedQuotePrice) {
+  if (
+    !mongoose.isObjectIdOrHexString(customerId) ||
+    typeof completedQuotePrice !== 'number' ||
+    !Number.isFinite(completedQuotePrice) ||
+    completedQuotePrice < 0
+  ) {
+    throw new TypeError(
+      'customerId must be a valid ObjectId and completedQuotePrice must be a non-negative number',
+    )
+  }
+
+  const tierPolicies = await TierDiscount.find()
+    .select('tier threshold')
+    .lean()
+  if (tierPolicies.length === 0) {
+    throw new Error('Customer tier policies are not configured')
+  }
+
+  const orderedTiers = orderedTierPolicies(tierPolicies)
+  const tierNames = orderedTiers.map(({ tier }) => tier)
+  const newTotalPriceExpression = {
+    $round: [
+      {
+        $add: [
+          { $ifNull: ['$_custom_json.total_price', 0] },
+          completedQuotePrice,
+        ],
+      },
+      2,
+    ],
+  }
+  const eligibleTierExpression = {
+    $switch: {
+      branches: [...orderedTiers].reverse().map(({ tier, threshold }) => ({
+        case: { $gt: [newTotalPriceExpression, threshold] },
+        then: tier,
+      })),
+      default: '$_custom_json.tier',
+    },
+  }
+  const promotedTierExpression = {
+    $let: {
+      vars: {
+        candidateTier: eligibleTierExpression,
+        currentTierIndex: {
+          $indexOfArray: [tierNames, '$_custom_json.tier'],
+        },
+      },
+      in: {
+        $let: {
+          vars: {
+            candidateTierIndex: {
+              $indexOfArray: [tierNames, '$$candidateTier'],
+            },
+          },
+          in: {
+            $cond: [
+              {
+                $and: [
+                  { $gte: ['$$candidateTierIndex', 0] },
+                  {
+                    $or: [
+                      { $eq: ['$$currentTierIndex', -1] },
+                      {
+                        $gt: [
+                          '$$candidateTierIndex',
+                          '$$currentTierIndex',
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              '$$candidateTier',
+              '$_custom_json.tier',
+            ],
+          },
+        },
+      },
+    },
+  }
+  const previousCustomer = await User.findOneAndUpdate(
+    {
+      _id: customerId,
+      role: USER_ROLES.CUSTOMER,
+      _custom_json: { $ne: null },
+    },
+    [
+      {
+        $set: {
+          '_custom_json.total_price': newTotalPriceExpression,
+          '_custom_json.tier': promotedTierExpression,
+        },
+      },
+    ],
+    { returnDocument: 'before', updatePipeline: true },
+  )
+
+  if (!previousCustomer) {
+    throw new Error('The completed quotation customer does not exist')
+  }
+
+  const previousTier = previousCustomer._custom_json.tier
+  const totalPrice =
+    Math.round(
+      ((previousCustomer._custom_json.total_price ?? 0) +
+        completedQuotePrice +
+        Number.EPSILON) *
+        100,
+    ) / 100
+  const tier = selectPromotedTier(tierPolicies, totalPrice, previousTier)
+
+  return {
+    customer_id: String(previousCustomer._id),
+    previous_tier: previousTier,
+    tier,
+    promoted: previousTier !== tier,
+    completed_quote_price: completedQuotePrice,
+    total_price: totalPrice,
+  }
+}

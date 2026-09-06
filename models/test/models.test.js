@@ -20,6 +20,7 @@ import {
   SubscriptionRevisionHistory,
   TierDiscount,
   User,
+  selectPromotedTier,
 } from '../index.js'
 import {
   CategoryDiscount as GatewayCategoryDiscount,
@@ -31,17 +32,22 @@ import {
 } from '../../night_sky/models.js'
 
 test('TierDiscount validates and normalizes its persisted values', async () => {
-  const validDiscount = new TierDiscount({ tier: '  gold  ', discount: 12 })
+  const validDiscount = new TierDiscount({
+    tier: '  gold  ',
+    discount: 12,
+    threshold: 5000,
+  })
 
   await validDiscount.validate()
 
   assert.equal(validDiscount.tier, 'GOLD')
   assert.equal(validDiscount.discount, 12)
+  assert.equal(validDiscount.threshold, 5000)
   assert.equal(TierDiscount.schema.path('tier').options.unique, true)
   assert.deepEqual(DEFAULT_CUSTOMER_TIERS, [
-    { tier: 'BRONZE', discount: 0 },
-    { tier: 'SILVER', discount: 0 },
-    { tier: 'GOLD', discount: 0 },
+    { tier: 'BRONZE', discount: 0, threshold: 0 },
+    { tier: 'SILVER', discount: 0, threshold: 0 },
+    { tier: 'GOLD', discount: 0, threshold: 0 },
   ])
 
   await assert.rejects(
@@ -67,6 +73,35 @@ test('TierDiscount validates and normalizes its persisted values', async () => {
   await assert.rejects(
     new TierDiscount({ tier: 'x'.repeat(101), discount: 0 }).validate(),
     (error) => error.errors.tier?.kind === 'maxlength',
+  )
+  await assert.rejects(
+    new TierDiscount({
+      tier: 'INVALID',
+      discount: 0,
+      threshold: -1,
+    }).validate(),
+    (error) => error.errors.threshold?.kind === 'min',
+  )
+})
+
+test('customer tier promotion uses strict thresholds and never downgrades', () => {
+  const tierPolicies = [
+    { tier: 'BRONZE', threshold: 0 },
+    { tier: 'SILVER', threshold: 1000 },
+    { tier: 'GOLD', threshold: 5000 },
+  ]
+
+  assert.equal(selectPromotedTier(tierPolicies, 1000, 'BRONZE'), 'BRONZE')
+  assert.equal(selectPromotedTier(tierPolicies, 1000.01, 'BRONZE'), 'SILVER')
+  assert.equal(selectPromotedTier(tierPolicies, 5000.01, 'BRONZE'), 'GOLD')
+  assert.equal(selectPromotedTier(tierPolicies, 10, 'GOLD'), 'GOLD')
+  assert.equal(
+    selectPromotedTier(
+      tierPolicies.map((policy) => ({ ...policy, threshold: 0 })),
+      1,
+      'BRONZE',
+    ),
+    'GOLD',
   )
 })
 
@@ -149,6 +184,9 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
   const riskPath = Quote.schema.path('risk')
   const subscriptionsPath = Quote.schema.path('subscription_details')
   const subscriptionLatestPath = SubscriptionDetails.schema.path('is_latest')
+  const customerTotalAppliedPath = Quote.schema.path(
+    'customer_total_price_applied',
+  )
   const productSchema = Quote.schema.path('products').schema
   const fulfillmentSchema = Quote.schema.path('fulfillment_details').schema
   const quoteRevision = new QuoteRevisionHistory({
@@ -174,6 +212,7 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
   )
   assert.equal(subscriptionLatestPath.instance, 'Boolean')
   assert.equal(subscriptionLatestPath.options.default, true)
+  assert.equal(customerTotalAppliedPath.options.default, false)
   assert.equal(productSchema.path('item_id').options.ref, 'Item')
   assert.equal(productSchema.path('article_id').options.ref, 'Article')
   assert.equal(productSchema.path('store_id').instance, 'ObjectId')
@@ -293,6 +332,10 @@ test('the shared User schema persists verification and soft deletion flags', () 
   assert.equal(deletionPath.instance, 'Boolean')
   assert.equal(deletionPath.options.required, true)
   assert.equal(user.is_deleted, false)
+  assert.equal(
+    User.schema.path('_custom_json.total_price').options.default,
+    0,
+  )
 })
 
 test('both services re-export the same shared discount model objects', () => {
