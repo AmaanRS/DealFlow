@@ -1064,4 +1064,134 @@ export async function updateQuotation(req, res) {
   }
 }
 
+export async function confirmCustomerQuote(req, res) {
+  requireDatabase();
+  const body = requireObject(req.body);
+  rejectUnknownFields(body, ["quote_id", "customer_id"]);
+
+  const quoteId = body.quote_id;
+  const customerId = body.customer_id;
+  if (!mongoose.isObjectIdOrHexString(quoteId)) {
+    throw new ApiError(
+      400,
+      "INVALID_QUOTE_ID",
+      "quote_id must be a valid MongoDB ObjectId",
+    );
+  }
+  if (!mongoose.isObjectIdOrHexString(customerId)) {
+    throw new ApiError(
+      400,
+      "INVALID_CUSTOMER_ID",
+      "customer_id must be a valid MongoDB ObjectId",
+    );
+  }
+
+  let quote = await Quote.findOne({
+    _id: quoteId,
+    customer: String(customerId),
+  }).lean();
+  if (!quote) {
+    throw new ApiError(404, "QUOTE_NOT_FOUND", "Quotation not found");
+  }
+  if (!quote.is_latest_quote) {
+    throw new ApiError(
+      409,
+      "QUOTE_VERSION_CONFLICT",
+      "Only the latest quotation revision can be confirmed",
+    );
+  }
+  if (!["NEGOTIATION", "COMPLETED"].includes(quote.status)) {
+    throw new ApiError(
+      409,
+      "QUOTE_NOT_CONFIRMABLE",
+      "Only a quotation in NEGOTIATION can be confirmed",
+      { current_status: quote.status },
+    );
+  }
+
+  let releasedInventory = [];
+  let transitioned = false;
+  if (quote.status === "NEGOTIATION") {
+    const completedQuote = await Quote.findOneAndUpdate(
+      {
+        _id: quote._id,
+        customer: String(customerId),
+        is_latest_quote: true,
+        status: "NEGOTIATION",
+      },
+      { $set: { status: "COMPLETED" } },
+      { returnDocument: "after", runValidators: true },
+    );
+
+    if (!completedQuote) {
+      quote = await Quote.findOne({
+        _id: quote._id,
+        customer: String(customerId),
+        is_latest_quote: true,
+      }).lean();
+      if (!quote || quote.status !== "COMPLETED") {
+        throw new ApiError(
+          409,
+          "QUOTE_VERSION_CONFLICT",
+          "The quotation changed while it was being confirmed",
+        );
+      }
+    } else {
+      quote = completedQuote;
+      transitioned = true;
+      try {
+        releasedInventory = await releaseQuoteInventory(quote.products);
+      } catch (error) {
+        const rollback = await Quote.updateOne(
+          {
+            _id: quote._id,
+            status: "COMPLETED",
+            customer_total_price_applied: { $ne: true },
+          },
+          { $set: { status: "NEGOTIATION" } },
+        );
+        if (rollback.modifiedCount !== 1) {
+          logger.error(
+            "Quotation confirmation status rollback failed",
+            {
+              "event.name": "quote.customer_confirmation.rollback.failed",
+              "event.outcome": "failure",
+              "request.id": req.requestId,
+              "quote.id": String(quote._id),
+              "quote.customer.id": String(customerId),
+            },
+            error,
+          );
+        }
+        throw error;
+      }
+    }
+  }
+
+  const customerTierResult = await applyCompletedQuoteToCustomer(quote);
+  const confirmedQuote = await quoteQuery(quote._id);
+
+  logger.info("Customer confirmed quotation", {
+    "event.name": "quote.customer_confirmation.completed",
+    "event.outcome": "success",
+    "request.id": req.requestId,
+    "quote.id": String(quote._id),
+    "quote.customer.id": String(customerId),
+    "quote.status": confirmedQuote.status,
+    "quote.confirmation.transitioned": transitioned,
+    "quote.inventory.release.count": releasedInventory.length,
+    "customer.total_price.credited":
+      customerTierResult?.completed_quote_price ?? 0,
+    "customer.total_price": customerTierResult?.total_price,
+    "customer.tier.previous": customerTierResult?.previous_tier,
+    "customer.tier": customerTierResult?.tier,
+    "customer.tier.promoted": customerTierResult?.promoted ?? false,
+  });
+
+  res.json({
+    quote: confirmedQuote,
+    customer_tier: customerTierResult,
+  });
+}
+
 export { ApiError };

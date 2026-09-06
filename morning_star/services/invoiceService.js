@@ -145,6 +145,59 @@ export async function createBillingInvoice(
   }
 }
 
+export async function getBillingInvoice(
+  quoteId,
+  { storage = invoiceStorage } = {},
+) {
+  const billing = await Billing.findOne({ quote_id: quoteId }).lean();
+  if (!billing) return null;
+
+  const objectKey = billing.invoice_object_key ?? billing.invoice_id;
+  let base64;
+  try {
+    base64 = await storage.getObjectText(objectKey);
+  } catch (error) {
+    logger.error(
+      "Billing invoice could not be read from object storage",
+      {
+        "event.name": "billing.invoice.storage_read.failed",
+        "event.outcome": "failure",
+        "billing.id": String(billing._id),
+        "invoice.id": billing.invoice_id,
+        "invoice.number": billing.invoice_number,
+        "invoice.object.key": objectKey,
+        "quote.id": String(billing.quote_id),
+      },
+      error,
+    );
+
+    const storageError = new Error("Invoice data could not be read", {
+      cause: error,
+    });
+    storageError.code = "INVOICE_STORAGE_READ_FAILED";
+    throw storageError;
+  }
+
+  if (typeof base64 !== "string" || base64.length === 0) {
+    const storageError = new Error("Stored invoice data is empty or invalid");
+    storageError.code = "INVOICE_STORAGE_INVALID_DATA";
+    throw storageError;
+  }
+
+  logger.info("Billing invoice retrieved from object storage", {
+    "event.name": "billing.invoice.retrieved",
+    "event.outcome": "success",
+    "billing.id": String(billing._id),
+    "invoice.id": billing.invoice_id,
+    "invoice.number": billing.invoice_number,
+    "invoice.object.key": objectKey,
+    "invoice.pdf.size_bytes": Buffer.byteLength(base64, "base64"),
+    "quote.id": String(billing.quote_id),
+  });
+
+  return { billing, base64 };
+}
+
 export async function deleteBillingInvoice(
   billing,
   { storage = invoiceStorage } = {},

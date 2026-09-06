@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { normalizeProductCategory } from '../api/productApi.js'
 import { quoteApi } from '../api/quoteApi.js'
 import { calculateQuote } from './dealMath.js'
 import { MOVABLE_STAGES } from './quoteStages.js'
@@ -325,7 +326,9 @@ export function WorkspaceProvider({ children, user }) {
       customer: quote.customer.id,
       products: quote.lines.map((line) => ({
         article_id: line.product.articleId,
-        category: line.product.categoryCode,
+        category: normalizeProductCategory(
+          line.product.categoryCode || line.product.category,
+        ),
         inv: line.quantity,
         applied_discount: line.discount,
       })),

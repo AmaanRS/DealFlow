@@ -8,6 +8,7 @@ import {
 } from "@app/observability";
 import { config } from "./convict.js";
 import { initializeQuoteCollections } from "./models.js";
+import customerRoutes from "./routes/customer.js";
 import quoteRoutes from "./routes/quote.js";
 import subscriptionRoutes from "./routes/subscription.js";
 import subscriptionDetailsRoutes from "./routes/subscriptionDetails.js";
@@ -26,6 +27,7 @@ const httpLogger = createLogger("morning-star.http", {
 
 app.use(createHttpRequestLogger(httpLogger));
 app.use(express.json({ limit: "64kb" }));
+app.use("/customer", customerRoutes);
 app.use("/quote", quoteRoutes);
 app.use("/subscription", subscriptionRoutes);
 app.use("/subscription_details", subscriptionDetailsRoutes);

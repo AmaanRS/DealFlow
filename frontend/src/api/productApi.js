@@ -4,6 +4,35 @@ const categoryLabels = {
   SERVICES: 'Services',
   SUBSCRIPTION: 'Subscriptions',
 }
+const categoryAliases = Object.freeze({
+  HARDWARE: 'HARDWARE',
+  SERVICE: 'SERVICES',
+  SERVICES: 'SERVICES',
+  SUBSCRIPTION: 'SUBSCRIPTION',
+  SUBSCRIPTIONS: 'SUBSCRIPTION',
+})
+
+export function normalizeProductCategory(value) {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  const category = categoryAliases[normalized]
+  if (!category) {
+    throw Object.assign(
+      new Error('Category must be Hardware, Services, or Subscription.'),
+      { code: 'INVALID_CATEGORY' },
+    )
+  }
+  return category
+}
+
+export function normalizeProductCategories(values) {
+  const entries = Array.isArray(values) ? values : [values]
+  return [...new Set(
+    entries
+      .flatMap((value) => String(value ?? '').split(','))
+      .filter((value) => value.trim())
+      .map(normalizeProductCategory),
+  )]
+}
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -74,9 +103,13 @@ export const productApi = {
   },
 
   create(payload) {
+    const normalizedPayload = {
+      ...payload,
+      categories: normalizeProductCategories(payload.categories ?? []),
+    }
     return request(`${PRODUCT_BASE_URL}/create_product`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(normalizedPayload),
     })
   },
 
