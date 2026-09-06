@@ -197,6 +197,29 @@ const sessionSchema = new mongoose.Schema(
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 sessionSchema.index({ userId: 1, revokedAt: 1 })
 
+const passwordResetTokenSchema = new mongoose.Schema(
+  {
+    tokenHash: {
+      type: String,
+      required: true,
+      unique: true,
+      select: false,
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    createdAt: { type: Date, required: true, default: Date.now },
+    expiresAt: { type: Date, required: true },
+    usedAt: { type: Date, default: null },
+  },
+  { collection: 'password_reset_tokens', versionKey: false },
+)
+
+passwordResetTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+passwordResetTokenSchema.index({ userId: 1, usedAt: 1, expiresAt: 1 })
+
 const portalInvitationSchema = new mongoose.Schema(
   {
     tokenHash: { type: String, required: true, unique: true },
@@ -280,6 +303,9 @@ auditEventSchema.index(
 export const User = mongoose.models.User ?? mongoose.model('User', userSchema)
 export const Session =
   mongoose.models.Session ?? mongoose.model('Session', sessionSchema)
+export const PasswordResetToken =
+  mongoose.models.PasswordResetToken ??
+  mongoose.model('PasswordResetToken', passwordResetTokenSchema)
 export const PortalInvitation =
   mongoose.models.PortalInvitation ??
   mongoose.model('PortalInvitation', portalInvitationSchema)

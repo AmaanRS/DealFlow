@@ -10,6 +10,7 @@ import {
 } from './contracts/auth.js'
 import forgotIllustration from './illustrations/forgot.svg'
 import loginIllustration from './illustrations/login.svg'
+import resetIllustration from './illustrations/reset.svg'
 import signupIllustration from './illustrations/signup.svg'
 import verifyIllustration from './illustrations/verify.svg'
 import CustomerPortal from './portal/CustomerPortal.jsx'
@@ -110,7 +111,9 @@ function AuthAside({ mode, state }) {
   const authenticated = state === 'authenticated'
   const illustration = pending || rejected
     ? verifyIllustration
-    : mode === 'forgot'
+    : mode === 'reset'
+      ? resetIllustration
+      : mode === 'forgot'
       ? forgotIllustration
     : mode === 'register'
       ? signupIllustration
@@ -131,6 +134,8 @@ function AuthAside({ mode, state }) {
               ? 'Your administrator left feedback.'
             : mode === 'forgot'
               ? 'Recover access without exposing your account.'
+            : mode === 'reset'
+              ? 'Choose a new password for your account.'
             : authenticated
               ? 'Access granted. Deals are waiting.'
               : 'Move every deal forward with confidence.'}
@@ -276,8 +281,27 @@ function PasswordResetRequested({ email, message, onBack }) {
   )
 }
 
+function PasswordResetComplete({ message, onBack }) {
+  return (
+    <div className="state-panel">
+      <span className="state-icon state-icon--success">
+        <StatusIcon type="success" />
+      </span>
+      <span className="state-eyebrow">Password updated</span>
+      <h1>Your password has been reset.</h1>
+      <p className="state-copy">{message}</p>
+      <button className="primary-button" type="button" onClick={onBack}>
+        Sign in with new password
+      </button>
+    </div>
+  )
+}
+
 function InternalAuth({ theme, onThemeToggle }) {
-  const [mode, setMode] = useState('login')
+  const [resetToken] = useState(() =>
+    new URLSearchParams(window.location.search).get('reset_token'),
+  )
+  const [mode, setMode] = useState(() => (resetToken ? 'reset' : 'login'))
   const [loginForm, setLoginForm] = useState(emptyLogin)
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration)
   const [passwordVisible, setPasswordVisible] = useState(false)
@@ -288,6 +312,8 @@ function InternalAuth({ theme, onThemeToggle }) {
   const [resubmissionContext, setResubmissionContext] = useState(null)
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotResult, setForgotResult] = useState(null)
+  const [resetForm, setResetForm] = useState({ password: '', confirmPassword: '' })
+  const [resetResult, setResetResult] = useState(null)
   const [sessionUser, setSessionUser] = useState(null)
 
   useEffect(() => {
@@ -312,6 +338,8 @@ function InternalAuth({ theme, onThemeToggle }) {
       ? 'rejected'
     : forgotResult
       ? 'reset-requested'
+    : resetResult
+      ? 'reset-complete'
     : sessionUser
       ? 'authenticated'
       : 'form'
@@ -322,6 +350,7 @@ function InternalAuth({ theme, onThemeToggle }) {
     }
     setMode(nextMode)
     setForgotResult(null)
+    setResetResult(null)
     setRejectedRequest(null)
     setResubmissionContext(null)
     setError('')
@@ -350,6 +379,20 @@ function InternalAuth({ theme, onThemeToggle }) {
     setBusy(true)
 
     try {
+      if (mode === 'reset') {
+        if (resetForm.password !== resetForm.confirmPassword) {
+          setError('Passwords do not match.')
+          return
+        }
+        const result = await authApi.resetPassword({
+          token: resetToken,
+          password: resetForm.password,
+        })
+        setResetResult(result)
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+
       if (mode === 'forgot') {
         const result = await authApi.forgotPassword({ email: forgotEmail })
         setForgotResult({ email: forgotEmail, message: result.message })
@@ -424,6 +467,7 @@ function InternalAuth({ theme, onThemeToggle }) {
     setRejectedRequest(null)
     setResubmissionContext(null)
     setForgotResult(null)
+    setResetResult(null)
     setMode('login')
     setLoginForm((current) => ({ ...current, email, password: '' }))
     setError('')
@@ -504,9 +548,14 @@ function InternalAuth({ theme, onThemeToggle }) {
                 message={forgotResult.message}
                 onBack={backToLogin}
               />
+            ) : resetResult ? (
+              <PasswordResetComplete
+                message={resetResult.message}
+                onBack={backToLogin}
+              />
             ) : (
               <div className="form-panel">
-                {mode === 'forgot' ? (
+                {mode === 'forgot' || mode === 'reset' ? (
                   <button
                     className="text-button"
                     type="button"
@@ -543,6 +592,8 @@ function InternalAuth({ theme, onThemeToggle }) {
                       ? 'Welcome back'
                       : mode === 'forgot'
                         ? 'Account recovery'
+                      : mode === 'reset'
+                        ? 'Secure password reset'
                         : 'Join DealFlow360'}
                   </span>
                   <h1>
@@ -550,6 +601,8 @@ function InternalAuth({ theme, onThemeToggle }) {
                       ? 'Sign in to move deals forward.'
                       : mode === 'forgot'
                         ? 'Reset your password securely.'
+                      : mode === 'reset'
+                        ? 'Create your new password.'
                         : 'Create your DealFlow account.'}
                   </h1>
                   <p>
@@ -557,6 +610,8 @@ function InternalAuth({ theme, onThemeToggle }) {
                       ? 'Use the account approved by your DealFlow360 administrator.'
                       : mode === 'forgot'
                         ? 'Enter your work email and we will accept a password reset request without revealing whether the account exists.'
+                      : mode === 'reset'
+                        ? 'This one-time link can be used once and expires after 15 minutes.'
                         : 'Customer is selected by default. Every new account is reviewed by an administrator before access is granted.'}
                   </p>
                 </div>
@@ -589,30 +644,32 @@ function InternalAuth({ theme, onThemeToggle }) {
                     </label>
                   )}
 
-                  <label className="field">
-                    <span>{mode === 'register' ? 'Email address' : 'Work email'}</span>
-                    <input
-                      name="email"
-                      type="email"
-                      value={
-                        mode === 'login'
-                          ? loginForm.email
-                          : mode === 'forgot'
-                            ? forgotEmail
-                            : registrationForm.email
-                      }
-                      onChange={
-                        mode === 'login'
-                          ? updateLogin
-                          : mode === 'forgot'
-                            ? (event) => setForgotEmail(event.target.value)
-                            : updateRegistration
-                      }
-                      autoComplete="email"
-                      placeholder="name@company.com"
-                      required
-                    />
-                  </label>
+                  {mode !== 'reset' && (
+                    <label className="field">
+                      <span>{mode === 'register' ? 'Email address' : 'Work email'}</span>
+                      <input
+                        name="email"
+                        type="email"
+                        value={
+                          mode === 'login'
+                            ? loginForm.email
+                            : mode === 'forgot'
+                              ? forgotEmail
+                              : registrationForm.email
+                        }
+                        onChange={
+                          mode === 'login'
+                            ? updateLogin
+                            : mode === 'forgot'
+                              ? (event) => setForgotEmail(event.target.value)
+                              : updateRegistration
+                        }
+                        autoComplete="email"
+                        placeholder="name@company.com"
+                        required
+                      />
+                    </label>
+                  )}
 
                   {mode !== 'forgot' && (
                     <label className="field">
@@ -624,9 +681,20 @@ function InternalAuth({ theme, onThemeToggle }) {
                           value={
                             mode === 'login'
                               ? loginForm.password
+                              : mode === 'reset'
+                                ? resetForm.password
                               : registrationForm.password
                           }
-                          onChange={mode === 'login' ? updateLogin : updateRegistration}
+                          onChange={
+                            mode === 'login'
+                              ? updateLogin
+                              : mode === 'reset'
+                                ? (event) => setResetForm((current) => ({
+                                    ...current,
+                                    password: event.target.value,
+                                  }))
+                                : updateRegistration
+                          }
                           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                           placeholder={mode === 'login' ? 'Enter your password' : 'At least 8 characters'}
                           minLength={8}
@@ -640,6 +708,25 @@ function InternalAuth({ theme, onThemeToggle }) {
                           <EyeIcon visible={passwordVisible} />
                         </button>
                       </span>
+                    </label>
+                  )}
+
+                  {mode === 'reset' && (
+                    <label className="field">
+                      <span>Confirm new password</span>
+                      <input
+                        name="confirmPassword"
+                        type={passwordVisible ? 'text' : 'password'}
+                        value={resetForm.confirmPassword}
+                        onChange={(event) => setResetForm((current) => ({
+                          ...current,
+                          confirmPassword: event.target.value,
+                        }))}
+                        autoComplete="new-password"
+                        placeholder="Repeat your new password"
+                        minLength={8}
+                        required
+                      />
                     </label>
                   )}
 
@@ -826,11 +913,15 @@ function InternalAuth({ theme, onThemeToggle }) {
                         ? 'Checking access…'
                         : mode === 'forgot'
                           ? 'Submitting request…'
+                        : mode === 'reset'
+                          ? 'Updating password…'
                           : 'Sending request…'
                       : mode === 'login'
                         ? 'Sign in securely'
                         : mode === 'forgot'
                           ? 'Request password reset'
+                        : mode === 'reset'
+                          ? 'Set new password'
                           : registrationForm.requestedRole === USER_ROLES.CUSTOMER
                             ? 'Submit customer registration'
                             : 'Submit access request'}

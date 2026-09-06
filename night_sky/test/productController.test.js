@@ -16,11 +16,32 @@ test("product list query applies pagination and category filters", () => {
   });
 });
 
-test("product search escapes regular-expression characters", () => {
+test("product search is returned for the caller to widen across name and SKU", () => {
   const result = parseProductListQuery({ search: "Desk.*" });
 
-  assert.equal(result.filter.name.$regex, "Desk\\.\\*");
-  assert.equal(result.filter.name.$options, "i");
+  // The raw term is handed back rather than baked into a name-only filter, so
+  // getProducts can also match a seller identifier held on the article.
+  assert.equal(result.search, "Desk.*");
+  assert.equal(result.filter.name, undefined);
+});
+
+test("product search combines with a category filter", () => {
+  const result = parseProductListQuery({
+    category: "hardware,services",
+    search: "chair",
+  });
+
+  assert.deepEqual(result.filter, {
+    categories: { $in: ["HARDWARE", "SERVICES"] },
+  });
+  assert.equal(result.search, "chair");
+});
+
+test("product search rejects an over-long term", () => {
+  assert.throws(
+    () => parseProductListQuery({ search: "x".repeat(101) }),
+    (error) => error.code === "INVALID_SEARCH",
+  );
 });
 
 test("product list accepts multiple categories for one paginated catalogue", () => {

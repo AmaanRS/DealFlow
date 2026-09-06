@@ -49,6 +49,13 @@ const realAuthApi = {
     })
   },
 
+  resetPassword(payload) {
+    return request(AUTH_ENDPOINTS.resetPassword, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
   getCurrentUser() {
     return request(AUTH_ENDPOINTS.me)
   },
@@ -57,8 +64,9 @@ const realAuthApi = {
     return request(AUTH_ENDPOINTS.logout, { method: 'POST' })
   },
 
-  listRegistrationRequests(status = 'PENDING_APPROVAL') {
+  listRegistrationRequests(status = 'PENDING_APPROVAL', { search } = {}) {
     const query = new URLSearchParams({ status })
+    if (search) query.set('search', search)
     return request(`${AUTH_ENDPOINTS.registrationRequests}?${query}`)
   },
 

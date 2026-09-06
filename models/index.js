@@ -23,6 +23,7 @@ export {
 } from './risk.js'
 export {
   AuditEvent,
+  PasswordResetToken,
   PortalInvitation,
   Session,
   User,

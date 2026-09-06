@@ -6,10 +6,16 @@ import {
   USER_ROLES,
   USER_STATUSES,
 } from '../constants.js'
+import { config } from '../config.js'
 import { asyncRoute, parseBody } from '../http.js'
-import { AuditEvent, User } from '../models.js'
+import { AuditEvent, PasswordResetToken, Session, User } from '../models.js'
+import {
+  assertPasswordResetEmailConfigured,
+  sendPasswordResetEmail,
+} from '../mailer.js'
 import {
   clearInternalCookie,
+  createOpaqueToken,
   ensureUserVerifiedForLogin,
   hashPassword,
   hashToken,
@@ -21,12 +27,15 @@ import {
   verifyPassword,
 } from '../security.js'
 import {
+  errorLogAttributes,
   logger,
   requestLogContext,
   setRequestAttributes,
 } from '../telemetry.js'
 
 const router = Router()
+const PASSWORD_RESET_LIFETIME_MS = 15 * 60 * 1000
+const PASSWORD_RESET_LIFETIME_MINUTES = PASSWORD_RESET_LIFETIME_MS / 60_000
 
 function identityFingerprint(email) {
   return hashToken(normalizeEmail(email)).slice(0, 16)
@@ -71,6 +80,11 @@ const loginSchema = z.object({
 
 const forgotPasswordSchema = z.object({
   email: z.string().trim().email().max(254),
+})
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(32).max(512),
+  password: z.string().min(8).max(128),
 })
 
 export async function createRegistrationRequest(
@@ -243,16 +257,78 @@ router.post(
     const body = parseBody(forgotPasswordSchema, req, res)
     if (!body) return
 
+    // Validate configuration before looking up the email so configuration
+    // errors cannot reveal whether an account exists.
+    assertPasswordResetEmailConfigured()
+
     const user = await User.findOne({
       emailLower: normalizeEmail(body.email),
-    }).select('_id')
+      status: USER_STATUSES.ACTIVE,
+      is_verified: true,
+      is_deleted: { $ne: true },
+    }).select('_id fullName email')
 
     if (user) {
-      await AuditEvent.create({
-        eventType: 'PASSWORD_RESET_REQUESTED',
-        targetUserId: user._id,
-        metadata: { requestId: req.requestId },
+      const rawToken = createOpaqueToken()
+      const tokenHash = hashToken(rawToken)
+      const createdAt = new Date()
+      const expiresAt = new Date(createdAt.getTime() + PASSWORD_RESET_LIFETIME_MS)
+
+      await PasswordResetToken.updateMany(
+        { userId: user._id, usedAt: null },
+        { $set: { usedAt: createdAt } },
+      )
+      const resetToken = await PasswordResetToken.create({
+        tokenHash,
+        userId: user._id,
+        createdAt,
+        expiresAt,
       })
+
+      const resetUrl = new URL('/', config.get('public_app_url'))
+      resetUrl.searchParams.set('reset_token', rawToken)
+
+      try {
+        await sendPasswordResetEmail({
+          to: user.email,
+          fullName: user.fullName,
+          resetUrl: resetUrl.toString(),
+          expiresInMinutes: PASSWORD_RESET_LIFETIME_MINUTES,
+        })
+
+        await AuditEvent.create({
+          eventType: 'PASSWORD_RESET_REQUESTED',
+          targetUserId: user._id,
+          metadata: {
+            requestId: req.requestId,
+            expiresAt,
+            delivery: 'sent',
+          },
+        })
+        setRequestAttributes(req, { 'email.delivery': 'sent' })
+      } catch (error) {
+        await PasswordResetToken.deleteOne({ _id: resetToken._id })
+        await AuditEvent.create({
+          eventType: 'PASSWORD_RESET_EMAIL_FAILED',
+          targetUserId: user._id,
+          metadata: {
+            requestId: req.requestId,
+            errorCode: error?.code ?? 'EMAIL_DELIVERY_FAILED',
+          },
+        })
+        setRequestAttributes(req, {
+          'email.delivery': 'failed',
+          'error.code': error?.code ?? 'EMAIL_DELIVERY_FAILED',
+        })
+        logger.error(
+          'Password reset email delivery failed',
+          requestLogContext(req, {
+            'event.name': 'auth.password_reset.email.failed',
+            'event.outcome': 'failure',
+            ...errorLogAttributes(error),
+          }),
+        )
+      }
     }
 
     setRequestAttributes(req, {
@@ -273,6 +349,112 @@ router.post(
 
     res.status(202).json({
       message: 'If an account exists for that email, the password reset request has been accepted.',
+    })
+  }),
+)
+
+router.post(
+  '/reset_password',
+  asyncRoute(async (req, res) => {
+    const body = parseBody(resetPasswordSchema, req, res)
+    if (!body) return
+
+    const now = new Date()
+    const tokenHash = hashToken(body.token)
+    const resetToken = await PasswordResetToken.findOne({
+      tokenHash,
+      usedAt: null,
+      expiresAt: { $gt: now },
+    })
+
+    if (!resetToken) {
+      setRequestAttributes(req, {
+        'event.outcome': 'failure',
+        'error.code': 'INVALID_OR_EXPIRED_RESET_TOKEN',
+        'auth.operation': 'password_reset',
+        'auth.outcome': 'invalid_or_expired_token',
+      })
+      res.status(400).json({
+        code: 'INVALID_OR_EXPIRED_RESET_TOKEN',
+        message: 'This password reset link is invalid, expired, or has already been used.',
+      })
+      return
+    }
+
+    const passwordHash = await hashPassword(body.password)
+    const consumed = await PasswordResetToken.findOneAndUpdate(
+      {
+        _id: resetToken._id,
+        usedAt: null,
+        expiresAt: { $gt: new Date() },
+      },
+      { $set: { usedAt: new Date() } },
+      { returnDocument: 'after' },
+    )
+
+    if (!consumed) {
+      res.status(400).json({
+        code: 'INVALID_OR_EXPIRED_RESET_TOKEN',
+        message: 'This password reset link is invalid, expired, or has already been used.',
+      })
+      return
+    }
+
+    const user = await User.findOneAndUpdate(
+      {
+        _id: consumed.userId,
+        status: USER_STATUSES.ACTIVE,
+        is_verified: true,
+        is_deleted: { $ne: true },
+      },
+      { $set: { passwordHash } },
+      { returnDocument: 'after' },
+    )
+
+    if (!user) {
+      res.status(400).json({
+        code: 'INVALID_OR_EXPIRED_RESET_TOKEN',
+        message: 'This password reset link is invalid, expired, or has already been used.',
+      })
+      return
+    }
+
+    await Promise.all([
+      Session.updateMany(
+        {
+          userId: user._id,
+          kind: SESSION_KINDS.INTERNAL,
+          revokedAt: null,
+        },
+        { $set: { revokedAt: now } },
+      ),
+      PasswordResetToken.updateMany(
+        { userId: user._id, usedAt: null },
+        { $set: { usedAt: now } },
+      ),
+      AuditEvent.create({
+        eventType: 'PASSWORD_RESET_COMPLETED',
+        targetUserId: user._id,
+        metadata: { requestId: req.requestId },
+      }),
+    ])
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'enduser.id': String(user._id),
+      'auth.operation': 'password_reset',
+      'auth.outcome': 'password_updated',
+    })
+    logger.info(
+      'Password reset completed',
+      requestLogContext(req, {
+        'event.name': 'auth.password_reset.completed',
+        'event.outcome': 'success',
+      }),
+    )
+
+    res.json({
+      message: 'Your password has been reset. You can now sign in with the new password.',
     })
   }),
 )

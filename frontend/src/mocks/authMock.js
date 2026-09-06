@@ -320,16 +320,35 @@ export const mockAuthApi = {
     }
   },
 
+  async resetPassword({ token }) {
+    await wait()
+    if (!token) {
+      throw apiError(
+        400,
+        'INVALID_OR_EXPIRED_RESET_TOKEN',
+        'This password reset link is invalid, expired, or has already been used.',
+      )
+    }
+    return {
+      message: 'Your password has been reset. You can now sign in with the new password.',
+    }
+  },
+
   async logout() {
     await wait()
     activeUserId = null
   },
 
-  async listRegistrationRequests() {
+  async listRegistrationRequests(status = USER_STATUSES.PENDING_APPROVAL, { search } = {}) {
     await wait()
+    const needle = String(search ?? '').trim().toLowerCase()
     return {
       items: readUsers()
-        .filter((user) => user.status === USER_STATUSES.PENDING_APPROVAL)
+        .filter((user) => user.status === status)
+        .filter((user) =>
+          !needle ||
+          user.fullName.toLowerCase().includes(needle) ||
+          user.email.toLowerCase().includes(needle))
         .map(registrationUser),
     }
   },

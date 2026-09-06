@@ -24,8 +24,12 @@ async function request(path, options = {}) {
 }
 
 export const storeApi = {
-  list({ limit = 100 } = {}) {
-    const query = new URLSearchParams({ limit: String(limit) })
+  list({ page = 1, limit = 100, search } = {}) {
+    const query = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    })
+    if (search) query.set('search', search)
     return request(`${STORE_BASE_URL}/get_stores?${query}`)
   },
 

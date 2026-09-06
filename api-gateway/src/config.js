@@ -77,6 +77,49 @@ convict.addFormat({
   },
 })
 
+convict.addFormat({
+  name: 'optional-string',
+  validate(value) {
+    if (value !== null && (typeof value !== 'string' || value.trim() === '')) {
+      throw new Error('must be null or a non-empty string')
+    }
+  },
+  coerce(value) {
+    if (value === null || value === undefined || value === '') return null
+    return String(value).trim()
+  },
+})
+
+convict.addFormat({
+  name: 'optional-port',
+  validate(value) {
+    if (
+      value !== null &&
+      (!Number.isInteger(value) || value < 1 || value > 65535)
+    ) {
+      throw new Error('must be null or a valid TCP port')
+    }
+  },
+  coerce(value) {
+    if (value === null || value === undefined || value === '') return null
+    return Number(value)
+  },
+})
+
+convict.addFormat({
+  name: 'optional-boolean',
+  validate(value) {
+    if (value !== null && typeof value !== 'boolean') {
+      throw new Error('must be null or a boolean')
+    }
+  },
+  coerce(value) {
+    if (value === null || value === undefined || value === '') return null
+    if (typeof value === 'boolean') return value
+    return String(value).toLowerCase() === 'true'
+  },
+})
+
 const config = convict({
   node_env: {
     format: ['development', 'test', 'production'],
@@ -119,6 +162,38 @@ const config = convict({
     format: 'http-url',
     default: null,
     env: 'NIGHT_SKY_URL',
+  },
+  mail_host: {
+    format: 'optional-string',
+    default: null,
+    env: 'MAIL_HOST',
+  },
+  mail_port: {
+    format: 'optional-port',
+    default: null,
+    env: 'MAIL_PORT',
+  },
+  mail_secure: {
+    format: 'optional-boolean',
+    default: null,
+    env: 'MAIL_SECURE',
+  },
+  mail_user: {
+    format: 'optional-string',
+    default: null,
+    env: 'MAIL_USER',
+    sensitive: true,
+  },
+  mail_app_password: {
+    format: 'optional-string',
+    default: null,
+    env: 'MAIL_APP_PASSWORD',
+    sensitive: true,
+  },
+  mail_from: {
+    format: 'optional-string',
+    default: null,
+    env: 'MAIL_FROM',
   },
 })
 

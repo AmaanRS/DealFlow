@@ -5,6 +5,7 @@ routes:
       - /v1/api/user/auth/login
       - /v1/api/user/auth/signup
       - /v1/api/user/auth/forgot_password
+      - /v1/api/user/auth/reset_password
       - /api/v1/auth/login
       - /api/v1/auth/registrations
       - /api/v1/portal/session

@@ -1,5 +1,6 @@
 export {
   AuditEvent,
+  PasswordResetToken,
   PortalInvitation,
   Session,
   User,

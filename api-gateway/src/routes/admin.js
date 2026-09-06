@@ -67,6 +67,28 @@ const configureRiskSchema = z
     },
   )
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Optional name or email search over registration requests.
+ *
+ * Returns `null` when no search was asked for and `false` when the term is
+ * unusable, so the caller can reject a bad term instead of silently listing
+ * everything.
+ */
+export function parseUserSearch(value) {
+  if (value === undefined || value === '') return null
+  if (Array.isArray(value)) return false
+
+  const search = String(value).trim()
+  if (!search) return null
+  if (search.length > 100) return false
+
+  return { $regex: escapeRegex(search), $options: 'i' }
+}
+
 function publicTierDiscount(discount) {
   return {
     id: String(discount._id),
@@ -509,9 +531,37 @@ router.get(
       return
     }
 
-    const users = await User.find({ status })
+    const search = parseUserSearch(req.query.search)
+    if (search === false) {
+      setRequestAttributes(req, {
+        'event.outcome': 'failure',
+        'error.code': 'INVALID_SEARCH',
+      })
+      res.status(400).json({
+        code: 'INVALID_SEARCH',
+        message: 'search must contain at most 100 characters.',
+      })
+      return
+    }
+
+    // Matched against the stored lowercase email so the term does not have to
+    // be cased the way the applicant typed it.
+    const filter = {
+      status,
+      ...(search
+        ? { $or: [{ fullName: search }, { emailLower: search }] }
+        : {}),
+    }
+    const users = await User.find(filter)
       .sort({ 'approval.requestedAt': -1, _id: -1 })
       .limit(100)
+
+    setRequestAttributes(req, {
+      'event.outcome': 'success',
+      'registration.status_filter': status,
+      'registration.searched': Boolean(search),
+      'registration.result_count': users.length,
+    })
 
     res.json({
       items: users.map(publicRegistration),

@@ -14,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { authApi } from '../../api/authApi.js'
-import { getRoleLabel, SIGNUP_ROLE_OPTIONS } from '../../contracts/auth.js'
+import { ALL_ROLE_OPTIONS, getRoleLabel } from '../../contracts/auth.js'
 import { productApi } from '../../api/productApi.js'
 import { storeApi } from '../../api/storeApi.js'
 import { useWorkspace } from '../WorkspaceContext.jsx'
@@ -119,6 +119,53 @@ const emptyStoreForm = {
 }
 
 const PRODUCT_PAGE_SIZE = 8
+const SEARCH_DEBOUNCE_MS = 350
+
+/**
+ * Search box that reports a debounced term.
+ *
+ * Filtering happens server side, so every keystroke would otherwise be a
+ * request. The input stays responsive by holding its own draft and only
+ * publishing once typing pauses.
+ */
+function SearchField({ value, onChange, placeholder, disabled = false }) {
+  const [draft, setDraft] = useState(value)
+
+  useEffect(() => {
+    if (draft === value) return undefined
+    const timer = window.setTimeout(() => onChange(draft.trim()), SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [draft, onChange, value])
+
+  return (
+    <label className="filter-search configuration-search">
+      <Search size={15} />
+      <input
+        type="search"
+        value={draft}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onChange(draft.trim())
+          }
+        }}
+      />
+      {draft && (
+        <button
+          type="button"
+          className="configuration-search__clear"
+          aria-label="Clear search"
+          onClick={() => { setDraft(''); onChange('') }}
+        >
+          <X size={13} />
+        </button>
+      )}
+    </label>
+  )
+}
 
 /**
  * One catalogue view with two modes.
@@ -132,6 +179,7 @@ function ProductsConfiguration({ mode = 'physical' }) {
   const subscriptionMode = mode === 'subscription'
   const [products, setProducts] = useState([])
   const [productPage, setProductPage] = useState(1)
+  const [productSearch, setProductSearch] = useState('')
   const [productPagination, setProductPagination] = useState({
     page: 1,
     total: 0,
@@ -158,6 +206,7 @@ function ProductsConfiguration({ mode = 'physical' }) {
       page: productPage,
       limit: PRODUCT_PAGE_SIZE,
       category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE,SERVICES',
+      search: productSearch || undefined,
     })
     const requests = subscriptionMode
       ? [productRequest]
@@ -180,7 +229,15 @@ function ProductsConfiguration({ mode = 'physical' }) {
       })
 
     return () => { mounted = false }
-  }, [productPage, subscriptionMode])
+  }, [productPage, productSearch, subscriptionMode])
+
+  function searchProducts(term) {
+    if (term === productSearch) return
+    setInventoryDraft(null)
+    setCatalogueState({ loading: true, error: '' })
+    setProductPage(1)
+    setProductSearch(term)
+  }
 
   function changeProductPage(nextPage) {
     if (
@@ -234,6 +291,7 @@ function ProductsConfiguration({ mode = 'physical' }) {
         page: 1,
         limit: PRODUCT_PAGE_SIZE,
         category: subscriptionMode ? 'SUBSCRIPTION' : 'HARDWARE,SERVICES',
+        search: productSearch || undefined,
       })
       setProducts(refreshed.products ?? [])
       setProductPage(1)
@@ -385,6 +443,14 @@ function ProductsConfiguration({ mode = 'physical' }) {
         description={subscriptionMode
           ? 'Subscription SKUs available to sales representatives when building a quotation.'
           : 'Manage inventory independently for each physical SKU.'}
+        action={(
+          <SearchField
+            value={productSearch}
+            onChange={searchProducts}
+            disabled={Boolean(catalogueState.error)}
+            placeholder={subscriptionMode ? 'Search subscriptions or SKU' : 'Search products or SKU'}
+          />
+        )}
       >
         <div className="data-table-wrap data-table-wrap--nested">
           <table className="data-table product-catalogue-table">
@@ -438,9 +504,11 @@ function ProductsConfiguration({ mode = 'physical' }) {
           {catalogueState.error && <div className="inline-error">{catalogueState.error}</div>}
           {!catalogueState.loading && !catalogueState.error && !visibleProducts.length && (
             <p className="empty-copy empty-copy--large">
-              {subscriptionMode
-                ? 'No subscriptions yet. Create the first one above.'
-                : 'No products yet. Create the first SKU above.'}
+              {productSearch
+                ? `Nothing matches “${productSearch}”. The search covers product names and SKUs.`
+                : subscriptionMode
+                  ? 'No subscriptions yet. Create the first one above.'
+                  : 'No products yet. Create the first SKU above.'}
             </p>
           )}
         </div>
@@ -662,15 +730,24 @@ function DiscountConfiguration({
 
 function WarehouseConfiguration() {
   const [stores, setStores] = useState([])
+  const [storeSearch, setStoreSearch] = useState('')
   const [storeForm, setStoreForm] = useState({ ...emptyStoreForm })
   const [storeState, setStoreState] = useState({ loading: true, error: '' })
   const [creatingStore, setCreatingStore] = useState(false)
 
   useEffect(() => {
     let mounted = true
-    storeApi.list()
+
+    // The first state write is deferred so re-running on a new search term does
+    // not set state synchronously inside the effect body.
+    Promise.resolve()
+      .then(() => {
+        if (!mounted) return null
+        setStoreState({ loading: true, error: '' })
+        return storeApi.list({ search: storeSearch || undefined })
+      })
       .then((result) => {
-        if (!mounted) return
+        if (!mounted || !result) return
         setStores(result.stores ?? [])
         setStoreState({ loading: false, error: '' })
       })
@@ -679,7 +756,7 @@ function WarehouseConfiguration() {
       })
 
     return () => { mounted = false }
-  }, [])
+  }, [storeSearch])
 
   async function createStore(event) {
     event.preventDefault()
@@ -690,7 +767,8 @@ function WarehouseConfiguration() {
         lat: Number(storeForm.lat),
         long: Number(storeForm.long),
       })
-      setStores((current) => [...current, result.store].sort((left, right) => left.name.localeCompare(right.name)))
+      const refreshed = await storeApi.list({ search: storeSearch || undefined })
+      setStores(refreshed.stores ?? [])
       setStoreForm({ ...emptyStoreForm })
       toast.success(`${result.store.name} created`, {
         description: 'The store is now available for inventory assignment.',
@@ -733,9 +811,14 @@ function WarehouseConfiguration() {
       <Panel
         title="Stores"
         description="Fulfillment locations currently available for inventory assignment."
-        action={!storeState.loading && stores.length
-          ? <span className="panel-count">{stores.length} store{stores.length === 1 ? '' : 's'}</span>
-          : null}
+        action={(
+          <SearchField
+            value={storeSearch}
+            onChange={setStoreSearch}
+            disabled={Boolean(storeState.error)}
+            placeholder="Search stores by name"
+          />
+        )}
       >
         {storeState.loading ? <p className="empty-copy empty-copy--large">Loading stores…</p> : (
           <div className="warehouse-config-grid">
@@ -755,7 +838,13 @@ function WarehouseConfiguration() {
                 </dl>
               </article>
             ))}
-            {!stores.length && <p className="empty-copy empty-copy--large">No stores created yet.</p>}
+            {!stores.length && (
+              <p className="empty-copy empty-copy--large">
+                {storeSearch
+                  ? `No store name matches “${storeSearch}”.`
+                  : 'No stores created yet.'}
+              </p>
+            )}
           </div>
         )}
       </Panel>
@@ -870,6 +959,8 @@ function AccessRequests({
   requests,
   loading,
   error,
+  search,
+  onSearchChange,
   reviewing,
   rejectionDraft,
   onBeginRejection,
@@ -877,44 +968,42 @@ function AccessRequests({
   onReasonChange,
   onReview,
 }) {
-  const [query, setQuery] = useState('')
+  // Name and email are matched server side. Role stays a client-side filter
+  // over the returned page, because the endpoint takes no role parameter.
   const [role, setRole] = useState('ALL')
-  const filteredRequests = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return requests.filter((request) => {
-      const matchesRole = role === 'ALL' || request.requestedRole === role
-      const matchesQuery =
-        !needle ||
-        request.fullName.toLowerCase().includes(needle) ||
-        request.email.toLowerCase().includes(needle)
-      return matchesRole && matchesQuery
-    })
-  }, [query, requests, role])
+  const filteredRequests = useMemo(
+    () => requests.filter(
+      (request) => role === 'ALL' || request.requestedRole === role,
+    ),
+    [requests, role],
+  )
 
   return (
     <Panel title="Account approval requests" description="Review customer registrations and internal role requests before granting access.">
       {loading ? <p className="empty-copy">Loading access requests…</p> : error ? <div className="inline-error">{error}</div> : (
         <>
           <div className="access-request-toolbar">
-            <label className="filter-search">
-              <Search size={15} />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search name or email"
-              />
-            </label>
+            <SearchField
+              value={search}
+              onChange={onSearchChange}
+              disabled={Boolean(error)}
+              placeholder="Search name or email"
+            />
             <label className="access-role-filter">
               <span>Role</span>
               <select value={role} onChange={(event) => setRole(event.target.value)}>
                 <option value="ALL">All roles</option>
-                {SIGNUP_ROLE_OPTIONS.map((option) => (
+                {ALL_ROLE_OPTIONS.map((option) => (
                   <option value={option.value} key={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
-            <small>{filteredRequests.length} of {requests.length} requests</small>
+            <small>
+              {role === 'ALL'
+                ? `${requests.length} request${requests.length === 1 ? '' : 's'}`
+                : `${filteredRequests.length} of ${requests.length} requests`}
+              {search ? ` matching “${search}”` : ''}
+            </small>
           </div>
 
           <div className="access-request-list">
@@ -980,8 +1069,10 @@ function AccessRequests({
           {!filteredRequests.length && (
             <p className="empty-copy">
               {requests.length
-                ? 'No approval requests match these filters.'
-                : 'No pending access requests.'}
+                ? 'No approval requests have that requested role.'
+                : search
+                  ? `No pending request matches “${search}”. The search covers name and email.`
+                  : 'No pending access requests.'}
             </p>
           )}
           </div>
@@ -1021,24 +1112,33 @@ export default function ConfigurationPage({ section = 'products' }) {
     loading: section === 'access',
     error: '',
   })
+  const [accessSearch, setAccessSearch] = useState('')
   const [reviewing, setReviewing] = useState(null)
   const [rejectionDraft, setRejectionDraft] = useState(null)
 
   useEffect(() => {
-    if (activeTab !== 'access' || user.role !== 'ADMIN') return
+    if (activeTab !== 'access' || user.role !== 'ADMIN') return undefined
     let mounted = true
-    authApi.listRegistrationRequests()
+
+    Promise.resolve()
+      .then(() => {
+        if (!mounted) return null
+        setRequestState({ loading: true, error: '' })
+        return authApi.listRegistrationRequests('PENDING_APPROVAL', {
+          search: accessSearch || undefined,
+        })
+      })
       .then((result) => {
-        if (mounted) {
-          setRequests(result.items)
-          setRequestState({ loading: false, error: '' })
-        }
+        if (!mounted || !result) return
+        setRequests(result.items)
+        setRequestState({ loading: false, error: '' })
       })
       .catch((error) => {
         if (mounted) setRequestState({ loading: false, error: error.message })
       })
+
     return () => { mounted = false }
-  }, [activeTab, user.role])
+  }, [accessSearch, activeTab, user.role])
 
   useEffect(() => {
     if (activeTab !== 'discounts' || user.role !== 'ADMIN') return
@@ -1198,6 +1298,8 @@ export default function ConfigurationPage({ section = 'products' }) {
       {activeTab === 'access' && (
         <AccessRequests
           requests={requests}
+          search={accessSearch}
+          onSearchChange={setAccessSearch}
           loading={requestState.loading}
           error={user.role === 'ADMIN' ? requestState.error : 'Administrator access is required to review registrations.'}
           reviewing={reviewing}

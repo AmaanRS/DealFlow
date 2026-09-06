@@ -8,6 +8,7 @@ await import('../src/config.js')
 const {
   callDiscountService,
   default: adminRoutes,
+  parseUserSearch,
   reviewPendingRegistration,
 } = await import('../src/routes/admin.js')
 const { shutdownObservability } = await import('@app/observability')
@@ -181,4 +182,20 @@ test('rejection soft deletes the user and persists the admin reason', async () =
   assert.equal(observed.auditEvent.metadata.is_verified, false)
   assert.equal(observed.auditEvent.metadata.is_deleted, true)
   assert.equal(observed.auditEvent.metadata.reason, 'Access could not be confirmed.')
+})
+
+test('registration search is optional, escaped, and length-capped', () => {
+  assert.equal(parseUserSearch(undefined), null)
+  assert.equal(parseUserSearch(''), null)
+  assert.equal(parseUserSearch('   '), null)
+
+  // A repeated query parameter would arrive as an array and is rejected rather
+  // than silently coerced into a nonsense pattern.
+  assert.equal(parseUserSearch(['a', 'b']), false)
+  assert.equal(parseUserSearch('x'.repeat(101)), false)
+
+  assert.deepEqual(parseUserSearch(' Aanya.* '), {
+    $regex: 'Aanya\\.\\*',
+    $options: 'i',
+  })
 })

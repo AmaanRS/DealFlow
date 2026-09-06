@@ -26,6 +26,25 @@ function parseItemIds(value) {
   ];
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Optional name search. Returns `null` for no search, `false` when the term is
+ * unusable, so the caller can tell "not asked for" from "asked for badly".
+ */
+function parseStoreSearch(value) {
+  if (value === undefined || value === "") return null;
+  if (Array.isArray(value)) return false;
+
+  const search = String(value).trim();
+  if (!search) return null;
+  if (search.length > 100) return false;
+
+  return { $regex: escapeRegex(search), $options: "i" };
+}
+
 function parsePagination(query) {
   const page = query.page === undefined ? 1 : Number(query.page);
   const limit = query.limit === undefined ? 20 : Number(query.limit);
@@ -714,6 +733,15 @@ export async function getStores(req, res) {
 
   const itemIds = parseItemIds(req.query.item_ids);
   const pagination = parsePagination(req.query);
+  const search = parseStoreSearch(req.query.search);
+
+  if (search === false) {
+    res.status(400).json({
+      code: "INVALID_SEARCH",
+      message: "search must contain at most 100 characters",
+    });
+    return;
+  }
 
   if (!pagination) {
     res.status(400).json({
@@ -754,14 +782,16 @@ export async function getStores(req, res) {
     }
   }
 
-  const storeFilter =
-    itemIds.length === 0
+  const storeFilter = {
+    ...(itemIds.length === 0
       ? {}
-      : { _id: { $in: [...itemIdsByStore.keys()] } };
+      : { _id: { $in: [...itemIdsByStore.keys()] } }),
+    ...(search ? { name: search } : {}),
+  };
   const { page, limit } = pagination;
   const [stores, total] = await Promise.all([
     Store.find(storeFilter)
-      .sort({ _id: 1 })
+      .sort({ name: 1, _id: 1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),

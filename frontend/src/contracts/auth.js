@@ -13,6 +13,7 @@ export const USER_STATUSES = Object.freeze({
   SUSPENDED: 'SUSPENDED',
 })
 
+/** Internal roles a visitor may request for themselves at signup. */
 export const INTERNAL_ROLE_OPTIONS = Object.freeze([
   {
     value: USER_ROLES.SALES_REP,
@@ -26,11 +27,25 @@ export const INTERNAL_ROLE_OPTIONS = Object.freeze([
     shortLabel: 'Manager',
     description: 'Review discount exceptions and monitor deal health.',
   },
+])
+
+/**
+ * Roles that exist and must still render a readable label, but which cannot be
+ * requested through public registration. Finance is provisioned by an
+ * administrator rather than self-selected.
+ */
+export const NON_REQUESTABLE_ROLE_OPTIONS = Object.freeze([
   {
     value: USER_ROLES.FINANCE,
     label: 'Finance & operations',
     shortLabel: 'Finance',
     description: 'Review high-risk deals, billing and fulfilment decisions.',
+  },
+  {
+    value: USER_ROLES.ADMIN,
+    label: 'Administrator',
+    shortLabel: 'Admin',
+    description: 'Manage catalogue, pricing policy and internal access.',
   },
 ])
 
@@ -46,10 +61,17 @@ export const SIGNUP_ROLE_OPTIONS = Object.freeze([
   ...INTERNAL_ROLE_OPTIONS,
 ])
 
+/** Every role, for labelling records that already carry one. */
+export const ALL_ROLE_OPTIONS = Object.freeze([
+  ...SIGNUP_ROLE_OPTIONS,
+  ...NON_REQUESTABLE_ROLE_OPTIONS,
+])
+
 export const AUTH_ENDPOINTS = Object.freeze({
   register: '/v1/api/user/auth/signup',
   login: '/v1/api/user/auth/login',
   forgotPassword: '/v1/api/user/auth/forgot_password',
+  resetPassword: '/v1/api/user/auth/reset_password',
   me: '/v1/api/user/auth/me',
   logout: '/v1/api/user/auth/logout',
   registrationRequests: '/v1/api/admin/registration-requests',
@@ -74,6 +96,7 @@ export const AUTH_ENDPOINTS = Object.freeze({
 })
 
 export function getRoleLabel(role) {
-  if (role === USER_ROLES.ADMIN) return 'Administrator'
-  return SIGNUP_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role
+  // Resolved across every role, not just the requestable ones, so an existing
+  // finance or administrator account still shows a readable label.
+  return ALL_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role
 }

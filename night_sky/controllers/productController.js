@@ -223,10 +223,36 @@ export function parseProductListQuery(query) {
         code: "INVALID_SEARCH",
       });
     }
-    if (search) filter.name = { $regex: escapeRegex(search), $options: "i" };
+    if (search) {
+      return {
+        filter,
+        page,
+        limit,
+        search,
+      };
+    }
   }
 
   return { filter, page, limit };
+}
+
+/**
+ * Widen a catalogue filter to match either the item name or the seller
+ * identifier of any article beneath it.
+ *
+ * A SKU lives on the article, not the item, so matching one means resolving the
+ * owning item ids first. An admin looking for "CHAIR-ERG-01" expects a hit, and
+ * a name-only regex would return nothing.
+ */
+async function withProductSearch(filter, search) {
+  const pattern = { $regex: escapeRegex(search), $options: "i" };
+  const itemIdsBySku = await Article.find({ seller_identifier: pattern })
+    .distinct("item_id");
+
+  const clauses = [{ name: pattern }];
+  if (itemIdsBySku.length > 0) clauses.push({ _id: { $in: itemIdsBySku } });
+
+  return { ...filter, $or: clauses };
 }
 
 export async function getProducts(req, res) {
@@ -235,15 +261,18 @@ export async function getProducts(req, res) {
     return;
   }
 
-  const { filter, page, limit } = parseProductListQuery(req.query);
+  const { filter, page, limit, search } = parseProductListQuery(req.query);
+  const effectiveFilter = search
+    ? await withProductSearch(filter, search)
+    : filter;
   const [products, total] = await Promise.all([
-    Item.find(filter)
+    Item.find(effectiveFilter)
       .sort({ name: 1, _id: 1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .populate("all_identifiers")
       .lean(),
-    Item.countDocuments(filter),
+    Item.countDocuments(effectiveFilter),
   ]);
   const currentProducts = await useLatestReportingHsns(products);
 

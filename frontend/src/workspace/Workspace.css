@@ -965,7 +965,6 @@
 .warehouse-config-grid dt { color: var(--ws-muted); font-size: 6px; letter-spacing: 0.05em; text-transform: uppercase; }
 .warehouse-config-grid dd { margin: 0; font-size: 8px; font-weight: 750; font-variant-numeric: tabular-nums; }
 
-.panel-count { color: var(--ws-muted); font-size: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .warehouse-utilization small { display: block; margin: 6px 0 12px; color: var(--ws-muted); font-size: 7px; }
 .plan-config-list { display: flex; flex-direction: column; gap: 8px; }
 .plan-config-list article { display: grid; grid-template-columns: auto minmax(180px, 0.7fr) minmax(360px, 1.5fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid rgba(158, 181, 216, 0.1); border-radius: 9px; }
@@ -1498,3 +1497,22 @@
 .discount-percentage-input--currency { width: 132px; }
 .discount-percentage-input--currency input { padding: 0 11px 0 26px; }
 .discount-percentage-input--currency i { right: auto; left: 11px; }
+
+/* Search sits in the panel header, so it is narrower than the page-level
+   filter bar and carries an inline clear affordance. */
+.configuration-search { position: relative; width: min(260px, 42vw); }
+.configuration-search input { width: 100%; padding-right: 26px; }
+.configuration-search input::-webkit-search-cancel-button { appearance: none; }
+.configuration-search__clear {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ws-muted);
+  background: color-mix(in srgb, var(--ws-line-strong) 45%, transparent);
+}
+.configuration-search__clear:hover { color: var(--ws-text); }
