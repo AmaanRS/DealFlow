@@ -4,7 +4,6 @@ import { promoteCustomerTier } from "@app/models/auth";
 import { Article, resolveLatestReportingHsns } from "@app/models/catalog";
 import {
   AUTO_APPROVER,
-  Billing,
   QUOTE_RISKS,
   QUOTE_STATUSES,
   Quote,
@@ -18,7 +17,12 @@ import {
   QUOTE_INPUT_FIELDS,
   priceQuotation,
   quoteIntentFromSnapshot,
+  rejectedRevisionAsDraft,
 } from "../services/quotePricing.js";
+import {
+  createBillingInvoice,
+  deleteBillingInvoice,
+} from "../services/invoiceService.js";
 
 const logger = createLogger("morning-star.quote-controller", {
   "service.component": "quote-controller",
@@ -382,9 +386,13 @@ async function advanceApprovedSubscriptionQuote(quote) {
     (product) => product.category === "SUBSCRIPTION",
   );
   if (quote.status !== "APPROVED" || subscriptionProducts.length === 0) {
+    const billing =
+      quote.status === "NEGOTIATION"
+        ? await createBillingInvoice(quote._id)
+        : null;
     return {
       quote,
-      billing: null,
+      billing,
       reservations: [],
       subscriptions: [],
       subscriptionRevisions: [],
@@ -418,7 +426,7 @@ async function advanceApprovedSubscriptionQuote(quote) {
     }
 
     reservations = await reserveQuoteInventory(negotiationQuote.products);
-    billing = await Billing.create({ quote_id: negotiationQuote._id });
+    billing = await createBillingInvoice(negotiationQuote._id);
 
     return {
       quote: negotiationQuote,
@@ -431,7 +439,7 @@ async function advanceApprovedSubscriptionQuote(quote) {
     await releaseInventoryReservations(reservations);
     await Promise.allSettled([
       billing?._id
-        ? Billing.deleteOne({ _id: billing._id })
+        ? deleteBillingInvoice(billing)
         : Promise.resolve(),
       SubscriptionRevisionHistory.deleteMany({
         _id: {
@@ -699,6 +707,9 @@ export async function createQuotation(req, res) {
         ? String(workflowResult.billing._id)
         : null,
       "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
+      "billing.invoice.number": workflowResult.billing?.invoice_number ?? null,
+      "billing.invoice.object_key":
+        workflowResult.billing?.invoice_object_key ?? null,
       "billing.final_amount": workflowResult.billing?.final_amt ?? null,
     });
 
@@ -713,7 +724,7 @@ export async function createQuotation(req, res) {
     }
     await Promise.allSettled([
       workflowResult?.billing?._id
-        ? Billing.deleteOne({ _id: workflowResult.billing._id })
+        ? deleteBillingInvoice(workflowResult.billing)
         : Promise.resolve(),
       workflowResult?.subscriptionRevisions?.length
         ? SubscriptionRevisionHistory.deleteMany({
@@ -838,10 +849,10 @@ export async function updateQuotation(req, res) {
     );
   }
 
-  const nextIntent = {
+  const nextIntent = rejectedRevisionAsDraft({
     ...quoteIntentFromSnapshot(currentQuote),
     ...updates,
-  };
+  });
   const inventoryCredits =
     currentQuote.status === "NEGOTIATION"
       ? inventoryByArticle(currentQuote.products)
@@ -924,6 +935,7 @@ export async function updateQuotation(req, res) {
       "quote.negotiation.id": newRevision.negotiation_id,
       "quote.version": newRevision.quote_version,
       "quote.previous.status": currentQuote.status,
+      "quote.requested.status": updates.status,
       "quote.status": updatedQuote.status,
       "quote.risk": updatedQuote.risk,
       "quote.risk.discount_percentage": riskEvaluation.discount_percentage,
@@ -940,6 +952,9 @@ export async function updateQuotation(req, res) {
       "quote.price.discounted": updatedQuote.discounted_price,
       "quote.price.selling": updatedQuote.selling_price,
       "billing.invoice.id": workflowResult.billing?.invoice_id ?? null,
+      "billing.invoice.number": workflowResult.billing?.invoice_number ?? null,
+      "billing.invoice.object_key":
+        workflowResult.billing?.invoice_object_key ?? null,
       "billing.final_amount": workflowResult.billing?.final_amt ?? null,
       "customer.total_price.credited":
         customerTierResult?.completed_quote_price ?? 0,
@@ -966,7 +981,7 @@ export async function updateQuotation(req, res) {
     }
     await Promise.allSettled([
       workflowResult?.billing?._id
-        ? Billing.deleteOne({ _id: workflowResult.billing._id })
+        ? deleteBillingInvoice(workflowResult.billing)
         : Promise.resolve(),
       workflowResult?.subscriptionRevisions?.length
         ? SubscriptionRevisionHistory.deleteMany({

@@ -397,6 +397,37 @@ const billingSchema = new Schema(
       ref: 'Quote',
       required: true,
       unique: true,
+      immutable: true,
+    },
+    invoice_number: {
+      type: String,
+      required: true,
+      immutable: true,
+      unique: true,
+      sparse: true,
+      maxlength: 16,
+      match: /^[A-Za-z0-9/-]+$/,
+    },
+    invoice_object_key: {
+      type: String,
+      required: true,
+      immutable: true,
+      unique: true,
+      sparse: true,
+      default() {
+        return this.invoice_id
+      },
+    },
+    invoice_created_at: {
+      type: Date,
+      required: true,
+      immutable: true,
+      default: Date.now,
+    },
+    invoice_etag: {
+      type: String,
+      default: null,
+      immutable: true,
     },
     final_amt: {
       ...nonNegativeNumber(),
@@ -405,6 +436,23 @@ const billingSchema = new Schema(
     },
   },
   { collection: 'billing', timestamps: true, versionKey: false },
+)
+
+const invoiceSequenceSchema = new Schema(
+  {
+    _id: {
+      type: String,
+      required: true,
+      match: /^\d{2}-\d{2}$/,
+    },
+    sequence: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+  },
+  { collection: 'invoice_sequences', versionKey: false },
 )
 
 billingSchema.pre('validate', async function calculateFinalAmount() {
@@ -455,6 +503,36 @@ export const SubscriptionRevisionHistory =
   )
 export const Billing =
   mongoose.models.Billing ?? mongoose.model('Billing', billingSchema)
+const InvoiceSequence =
+  mongoose.models.InvoiceSequence ??
+  mongoose.model('InvoiceSequence', invoiceSequenceSchema)
+
+export function indianFinancialYear(value = new Date()) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) throw new TypeError('date must be valid')
+
+  // Work in Indian Standard Time so invoices around midnight are assigned to
+  // the correct Indian financial year.
+  const indiaDate = new Date(date.getTime() + 330 * 60 * 1000)
+  const year = indiaDate.getUTCFullYear()
+  const startYear = indiaDate.getUTCMonth() >= 3 ? year : year - 1
+  return `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`
+}
+
+export async function allocateInvoiceNumber(value = new Date()) {
+  const financialYear = indianFinancialYear(value)
+  const counter = await InvoiceSequence.findOneAndUpdate(
+    { _id: financialYear },
+    { $inc: { sequence: 1 } },
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
+  )
+
+  if (!counter || counter.sequence > 999999) {
+    throw new Error(`Invoice sequence exhausted for FY ${financialYear}`)
+  }
+
+  return `DF/${financialYear}/${String(counter.sequence).padStart(6, '0')}`
+}
 
 const quoteModels = [
   RiskConfiguration,
@@ -463,6 +541,7 @@ const quoteModels = [
   SubscriptionDetails,
   SubscriptionRevisionHistory,
   Billing,
+  InvoiceSequence,
 ]
 
 async function migrateQuoteRevisionIndexes() {

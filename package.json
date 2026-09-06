@@ -8,6 +8,7 @@
     "models",
     "morning_star",
     "night_sky",
+    "object_storage",
     "observability"
   ],
   "dependencies": {

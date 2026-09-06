@@ -92,6 +92,25 @@ test('quotation updates keep only sales-editable fields and trusted ownership', 
   })
 })
 
+test('a rejected quotation is returned to the sales rep as a draft', () => {
+  const body = buildUpdateQuotationBody(
+    {
+      quote_id: '507f1f77bcf86cd799439011',
+      updates: {
+        status: 'REJECTED',
+        reason: 'Discount is too high',
+      },
+    },
+    { email: 'sales@example.com' },
+    { email: 'manager@example.com' },
+  )
+
+  assert.equal(body.updates.status, 'DRAFT')
+  assert.equal(body.updates.reason, 'Discount is too high')
+  assert.equal(body.updates.assigned_to, 'sales@example.com')
+  assert.equal(body.updates.approved_by, null)
+})
+
 test('sales representatives can only list quotations they created', () => {
   const url = new URL('http://morning_star:3002/quote/get_quotes')
 

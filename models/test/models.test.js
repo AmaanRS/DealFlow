@@ -20,6 +20,7 @@ import {
   SubscriptionRevisionHistory,
   TierDiscount,
   User,
+  indianFinancialYear,
   latestReportingHsnEntry,
   resolveLatestReportingHsns,
   selectPromotedTier,
@@ -281,6 +282,18 @@ test('quote models preserve references, workflow enums, and UUID defaults', () =
   assert.equal(fulfillmentSchema.path('store').options.ref, 'Store')
   assert.match(quoteRevision.negotiation_id, /^[0-9a-f-]{36}$/i)
   assert.match(billing.invoice_id, /^[0-9a-f-]{36}$/i)
+  assert.equal(billing.invoice_object_key, billing.invoice_id)
+  assert.equal(Billing.schema.path('invoice_number').options.maxlength, 16)
+  assert.equal(Billing.schema.path('invoice_number').options.unique, true)
+  assert.equal(Billing.schema.path('quote_id').options.immutable, true)
+  assert.equal(Billing.schema.path('quote_id').options.unique, true)
+  assert.equal(Billing.schema.path('invoice_object_key').options.unique, true)
+  assert.equal(Billing.schema.path('invoice_object_key').options.sparse, true)
+})
+
+test('Indian invoice financial years switch on April 1 in IST', () => {
+  assert.equal(indianFinancialYear('2026-03-31T18:29:59.000Z'), '25-26')
+  assert.equal(indianFinancialYear('2026-03-31T18:30:00.000Z'), '26-27')
 })
 
 test('quote revision history has one row per quote and unique versions per negotiation', () => {

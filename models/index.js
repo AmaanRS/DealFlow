@@ -46,5 +46,7 @@ export {
   QuoteRevisionHistory,
   SubscriptionDetails,
   SubscriptionRevisionHistory,
+  allocateInvoiceNumber,
+  indianFinancialYear,
   initializeQuoteCollections,
 } from './quotes.js'

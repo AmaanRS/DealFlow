@@ -115,7 +115,9 @@ export function buildUpdateQuotationBody(body, authenticatedUser, reviewer) {
       SALES_EDITABLE_QUOTE_FIELDS.includes(field),
     ),
   )
-  const status = updates.status === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL'
+  const status = ['DRAFT', 'REJECTED'].includes(updates.status)
+    ? 'DRAFT'
+    : 'PENDING_APPROVAL'
 
   return {
     quote_id: body.quote_id,
@@ -293,8 +295,11 @@ router.patch(
       return
     }
 
-    const requestedStatus =
-      body.updates.status === 'DRAFT' ? 'DRAFT' : 'PENDING_APPROVAL'
+    const requestedStatus = ['DRAFT', 'REJECTED'].includes(
+      body.updates.status,
+    )
+      ? 'DRAFT'
+      : 'PENDING_APPROVAL'
     let reviewer = req.auth.user
     if (requestedStatus === 'PENDING_APPROVAL') {
       reviewer = await findActiveManager()

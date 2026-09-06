@@ -13,9 +13,11 @@
   },
   "dependencies": {
     "@app/models": "^1.0.0",
+    "@app/object-storage": "^1.0.0",
     "@app/observability": "^1.0.0",
     "convict": "^6.2.5",
     "express": "^5.2.1",
-    "mongoose": "^9.9.5"
+    "mongoose": "^9.9.5",
+    "pdfkit": "^0.20.2"
   }
 }

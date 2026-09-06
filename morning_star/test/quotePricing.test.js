@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   applyCreationRiskWorkflow,
   calculateQuoteRisk,
+  rejectedRevisionAsDraft,
 } from "../services/quotePricing.js";
 
 const thresholds = {
@@ -26,6 +27,21 @@ test("an explicit draft stays a draft until the sales rep submits it", () => {
 
   assert.equal(result.status, "DRAFT");
   assert.equal(result.approved_by, null);
+});
+
+test("a rejected quotation revision returns to draft", () => {
+  assert.deepEqual(
+    rejectedRevisionAsDraft({
+      status: "REJECTED",
+      approved_by: "manager@example.com",
+      reason: "Discount is too high",
+    }),
+    {
+      status: "DRAFT",
+      approved_by: null,
+      reason: "Discount is too high",
+    },
+  );
 });
 
 test("submitted LOW risk auto-approves while MEDIUM waits for approval", () => {

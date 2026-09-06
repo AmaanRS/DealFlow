@@ -72,6 +72,16 @@ export function normalizeQuoteInput(input) {
   return normalized;
 }
 
+export function rejectedRevisionAsDraft(input) {
+  if (input.status !== "REJECTED") return input;
+
+  return {
+    ...input,
+    status: "DRAFT",
+    approved_by: null,
+  };
+}
+
 export function applyCreationRiskWorkflow(pricedQuotation) {
   if (pricedQuotation.status === "DRAFT") {
     return normalizeQuoteInput({

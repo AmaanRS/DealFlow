@@ -13,6 +13,9 @@
 !models/
 !models/*.js
 !models/package.json
+!object_storage/
+!object_storage/*.js
+!object_storage/package.json
 !observability/
 !observability/*.js
 !observability/package.json
