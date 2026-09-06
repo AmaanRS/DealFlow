@@ -92,6 +92,11 @@ const storeSchema = new Schema(
   { collection: 'stores', timestamps: true },
 )
 
+storeSchema.index(
+  { name: 1, lat: 1, long: 1 },
+  { name: 'store_identity_unique', unique: true },
+)
+
 const inventorySchema = new Schema(
   {
     sellable: nonNegativeInteger(),
@@ -106,13 +111,11 @@ const articleSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Item',
       required: true,
-      index: true,
     },
     seller_identifier: {
       type: String,
       required: true,
       trim: true,
-      index: true,
     },
     price: {
       ...nonNegativeInteger(),
@@ -133,7 +136,14 @@ const articleSchema = new Schema(
   { collection: 'articles', timestamps: true },
 )
 
-articleSchema.index({ item_id: 1, store_id: 1 })
+articleSchema.index(
+  { seller_identifier: 1 },
+  { name: 'article_seller_identifier_unique', unique: true },
+)
+articleSchema.index(
+  { item_id: 1, store_id: 1, 'inventory.sellable': -1 },
+  { name: 'article_inventory_by_item' },
+)
 
 const itemSchema = new Schema(
   {
@@ -175,6 +185,19 @@ const itemSchema = new Schema(
     },
   },
   { collection: 'items', timestamps: true },
+)
+
+itemSchema.index(
+  { name: 1, _id: 1 },
+  { name: 'item_name_list' },
+)
+itemSchema.index(
+  { categories: 1, name: 1, _id: 1 },
+  { name: 'item_category_name_list' },
+)
+itemSchema.index(
+  { reporting_hsn: 1 },
+  { name: 'item_by_reporting_hsn' },
 )
 
 articleSchema.pre('validate', async function enforceSubscriptionArticle() {
@@ -343,7 +366,58 @@ const catalogModels = [
   Item,
 ]
 
+async function migrateArticleIndexes() {
+  await Article.createCollection()
+
+  const indexes = await Article.collection.indexes()
+  const sellerIdentifierIndexes = indexes.filter(
+    (index) =>
+      Object.keys(index.key).length === 1 &&
+      index.key.seller_identifier === 1,
+  )
+  const hasUniqueSellerIdentifierIndex = sellerIdentifierIndexes.some(
+    (index) => index.unique,
+  )
+
+  if (!hasUniqueSellerIdentifierIndex) {
+    const duplicate = await Article.aggregate([
+      {
+        $group: {
+          _id: '$seller_identifier',
+          count: { $sum: 1 },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 1 },
+    ])
+
+    if (duplicate.length > 0) {
+      throw new Error(
+        `Cannot create the unique seller_identifier index while duplicate value "${duplicate[0]._id}" exists`,
+      )
+    }
+  }
+
+  await Promise.all(
+    sellerIdentifierIndexes
+      .filter((index) => !index.unique)
+      .map((index) => Article.collection.dropIndex(index.name)),
+  )
+
+  const obsoleteSellerStoreIndex = indexes.find(
+    (index) =>
+      Object.keys(index.key).length === 2 &&
+      index.key.seller_identifier === 1 &&
+      index.key.store_id === 1,
+  )
+
+  if (obsoleteSellerStoreIndex) {
+    await Article.collection.dropIndex(obsoleteSellerStoreIndex.name)
+  }
+}
+
 export async function initializeCollections() {
+  await migrateArticleIndexes()
   await Promise.all(catalogModels.map((model) => model.init()))
   return catalogModels.map((model) => model.collection.collectionName)
 }

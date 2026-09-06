@@ -224,6 +224,58 @@ test('quote revision history has one row per quote and unique versions per negot
   )
 })
 
+test('shared schemas declare business-unique and query-aligned indexes', () => {
+  function indexOptions(Model, fields) {
+    return Model.schema.indexes().find(
+      ([indexFields]) =>
+        JSON.stringify(indexFields) === JSON.stringify(fields),
+    )?.[1]
+  }
+
+  assert.equal(
+    indexOptions(CategoryDiscount, { subscription: 1 })?.unique,
+    true,
+  )
+  assert.equal(
+    indexOptions(Store, { name: 1, lat: 1, long: 1 })?.unique,
+    true,
+  )
+  assert.equal(
+    indexOptions(Article, { seller_identifier: 1 })?.unique,
+    true,
+  )
+  assert.equal(
+    indexOptions(PortalInvitation, {
+      quotationId: 1,
+      customerEmailLower: 1,
+    })?.unique,
+    true,
+  )
+
+  assert.ok(
+    indexOptions(Item, { categories: 1, name: 1, _id: 1 }),
+  )
+  assert.ok(
+    indexOptions(Quote, {
+      risk: 1,
+      is_latest_quote: 1,
+      updatedAt: -1,
+      _id: -1,
+    }),
+  )
+  assert.ok(
+    indexOptions(SubscriptionDetails, {
+      status: 1,
+      is_latest: 1,
+      updatedAt: -1,
+      _id: -1,
+    }),
+  )
+  assert.ok(
+    indexOptions(AuditEvent, { quotationId: 1, occurredAt: -1 }),
+  )
+})
+
 test('the shared User schema persists verification and soft deletion flags', () => {
   const verificationPath = User.schema.path('is_verified')
   const deletionPath = User.schema.path('is_deleted')

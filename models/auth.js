@@ -82,7 +82,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: Object.values(USER_STATUSES),
       required: true,
-      index: true,
     },
     is_verified: {
       type: Boolean,
@@ -104,7 +103,25 @@ const userSchema = new mongoose.Schema(
   { collection: 'users', timestamps: true, versionKey: false },
 )
 
-userSchema.index({ status: 1, 'approval.requestedAt': -1 })
+userSchema.index(
+  { status: 1, 'approval.requestedAt': -1, _id: -1 },
+  { name: 'user_registration_queue' },
+)
+userSchema.index(
+  {
+    role: 1,
+    status: 1,
+    is_verified: 1,
+    is_deleted: 1,
+    fullName: 1,
+    _id: 1,
+  },
+  { name: 'user_customer_directory' },
+)
+userSchema.index(
+  { is_deleted: 1, status: 1, createdAt: -1, _id: -1 },
+  { name: 'user_admin_list' },
+)
 
 userSchema.pre('validate', async function assignCustomerTier() {
   const effectiveRole = this.role ?? this.requestedRole
@@ -148,7 +165,6 @@ const sessionSchema = new mongoose.Schema(
       type: String,
       enum: Object.values(SESSION_KINDS),
       required: true,
-      index: true,
     },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -177,7 +193,7 @@ sessionSchema.index({ userId: 1, revokedAt: 1 })
 const portalInvitationSchema = new mongoose.Schema(
   {
     tokenHash: { type: String, required: true, unique: true },
-    quotationId: { type: String, required: true, maxlength: 100, index: true },
+    quotationId: { type: String, required: true, maxlength: 100 },
     quotationReference: { type: String, required: true, maxlength: 100 },
     customerName: { type: String, required: true, trim: true, maxlength: 120 },
     customerEmail: { type: String, required: true, trim: true, maxlength: 254 },
@@ -204,9 +220,22 @@ const portalInvitationSchema = new mongoose.Schema(
   },
 )
 
+portalInvitationSchema.index(
+  { quotationId: 1, customerEmailLower: 1 },
+  {
+    name: 'portal_invitation_active_unique',
+    unique: true,
+    partialFilterExpression: { revokedAt: null },
+  },
+)
+portalInvitationSchema.index(
+  { createdByUserId: 1, createdAt: -1 },
+  { name: 'portal_invitation_by_creator' },
+)
+
 const auditEventSchema = new mongoose.Schema(
   {
-    eventType: { type: String, required: true, maxlength: 100, index: true },
+    eventType: { type: String, required: true, maxlength: 100 },
     actorUserId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -222,6 +251,23 @@ const auditEventSchema = new mongoose.Schema(
     occurredAt: { type: Date, required: true, default: Date.now, index: true },
   },
   { collection: 'auditevents', versionKey: false },
+)
+
+auditEventSchema.index(
+  { eventType: 1, occurredAt: -1 },
+  { name: 'audit_event_by_type' },
+)
+auditEventSchema.index(
+  { actorUserId: 1, occurredAt: -1 },
+  { name: 'audit_event_by_actor' },
+)
+auditEventSchema.index(
+  { targetUserId: 1, occurredAt: -1 },
+  { name: 'audit_event_by_target' },
+)
+auditEventSchema.index(
+  { quotationId: 1, occurredAt: -1 },
+  { name: 'audit_event_by_quotation' },
 )
 
 export const User = mongoose.models.User ?? mongoose.model('User', userSchema)

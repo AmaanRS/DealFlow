@@ -30,6 +30,17 @@ const categoryDiscountSchema = new mongoose.Schema(
   },
 )
 
+// subscription is intentionally fixed at zero, so making it unique also
+// enforces that category_discounts remains a singleton configuration.
+categoryDiscountSchema.index(
+  { subscription: 1 },
+  { name: 'category_discount_singleton', unique: true },
+)
+categoryDiscountSchema.index(
+  { updatedAt: -1, _id: -1 },
+  { name: 'category_discount_latest' },
+)
+
 const tierDiscountSchema = new mongoose.Schema(
   {
     tier: {

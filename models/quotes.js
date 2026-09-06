@@ -111,7 +111,6 @@ const quoteSchema = new Schema(
       ref: User.modelName,
       required: true,
       trim: true,
-      index: true,
       validate: {
         validator: mongoose.isObjectIdOrHexString,
         message: 'customer must be a valid User ObjectId string',
@@ -145,7 +144,6 @@ const quoteSchema = new Schema(
       enum: QUOTE_STATUSES,
       default: 'DRAFT',
       required: true,
-      index: true,
     },
     reason: {
       type: String,
@@ -157,14 +155,12 @@ const quoteSchema = new Schema(
       type: Boolean,
       default: true,
       required: true,
-      index: true,
     },
     risk: {
       type: String,
       enum: QUOTE_RISKS,
       default: 'LOW',
       required: true,
-      index: true,
     },
     fulfillment_details: {
       type: [fulfillmentDetailSchema],
@@ -180,8 +176,34 @@ const quoteSchema = new Schema(
   { collection: 'quotes', timestamps: true, versionKey: false },
 )
 
-quoteSchema.index({ customer: 1, is_latest_quote: 1, createdAt: -1 })
-quoteSchema.index({ status: 1, risk: 1, createdAt: -1 })
+quoteSchema.index(
+  { is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_latest_list' },
+)
+quoteSchema.index(
+  { customer: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_customer' },
+)
+quoteSchema.index(
+  { status: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_status' },
+)
+quoteSchema.index(
+  { risk: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_risk' },
+)
+quoteSchema.index(
+  { created_by: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_creator' },
+)
+quoteSchema.index(
+  { approved_by: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_approver' },
+)
+quoteSchema.index(
+  { assigned_to: 1, is_latest_quote: 1, updatedAt: -1, _id: -1 },
+  { name: 'quote_by_assignee' },
+)
 
 const quoteRevisionHistorySchema = new Schema(
   {
@@ -238,20 +260,17 @@ const subscriptionDetailsSchema = new Schema(
       ref: 'Item',
       required: true,
       immutable: true,
-      index: true,
     },
     status: {
       type: String,
       enum: SUBSCRIPTION_STATUSES,
       default: 'ACTIVE',
       required: true,
-      index: true,
     },
     is_latest: {
       type: Boolean,
       default: true,
       required: true,
-      index: true,
     },
     subscription_price: {
       ...nonNegativeNumber(),
@@ -267,7 +286,22 @@ const subscriptionDetailsSchema = new Schema(
   { collection: 'subscription_details', timestamps: true, versionKey: false },
 )
 
-subscriptionDetailsSchema.index({ item_id: 1, is_latest: 1, updatedAt: -1 })
+subscriptionDetailsSchema.index(
+  { is_latest: 1, updatedAt: -1, _id: -1 },
+  { name: 'subscription_latest_list' },
+)
+subscriptionDetailsSchema.index(
+  { status: 1, is_latest: 1, updatedAt: -1, _id: -1 },
+  { name: 'subscription_by_status' },
+)
+subscriptionDetailsSchema.index(
+  { article_id: 1, is_latest: 1, updatedAt: -1, _id: -1 },
+  { name: 'subscription_by_article' },
+)
+subscriptionDetailsSchema.index(
+  { item_id: 1, is_latest: 1, updatedAt: -1, _id: -1 },
+  { name: 'subscription_by_item' },
+)
 
 subscriptionDetailsSchema.pre('validate', async function deriveSubscriptionPricing() {
   if (!this.article_id || (!this.isNew && !this.isModified('article_id'))) return
@@ -325,7 +359,6 @@ const subscriptionRevisionHistorySchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'SubscriptionDetails',
       required: true,
-      index: true,
     },
   },
   {
