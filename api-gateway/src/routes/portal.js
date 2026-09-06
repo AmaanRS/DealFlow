@@ -29,8 +29,8 @@ import {
 
 const router = Router()
 const quoteServiceUrl = config.get('morning_star_url')
-const customerVisibleStatuses = new Set(['APPROVED', 'NEGOTIATION', 'COMPLETED'])
-const customerMutableStatuses = new Set(['APPROVED', 'NEGOTIATION'])
+const customerVisibleStatuses = new Set(['NEGOTIATION', 'COMPLETED'])
+const customerMutableStatuses = new Set(['NEGOTIATION'])
 
 function customerFingerprint(email) {
   return hashToken(normalizeEmail(email)).slice(0, 16)

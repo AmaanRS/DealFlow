@@ -54,14 +54,6 @@ export function buildApprovalUpdate({
     )
   }
 
-  if (quote.assigned_to !== reviewer.email) {
-    throw approvalError(
-      403,
-      'QUOTE_NOT_ASSIGNED',
-      'This quotation is assigned to another reviewer.',
-    )
-  }
-
   if (reviewer.role === USER_ROLES.FINANCE) {
     const managerApproved =
       quote.risk === 'HIGH' &&

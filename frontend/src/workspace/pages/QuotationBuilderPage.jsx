@@ -4,9 +4,11 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  MessageSquareText,
   Minus,
   PackagePlus,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Send,
@@ -29,20 +31,41 @@ const CATALOGUE_CATEGORIES = 'HARDWARE,SERVICES'
 const CATEGORY_CODES = { Hardware: 'HARDWARE', Services: 'SERVICES' }
 
 function WorkflowSteps({ stage }) {
-  const stages = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'FULFILLMENT']
-  const activeIndex = Math.max(0, stages.indexOf(stage))
-  const labels = ['Build quote', 'Approval', 'Customer', 'Fulfillment']
+  const stages = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'NEGOTIATION', 'COMPLETED']
+  const activeIndex = stage === 'REJECTED'
+    ? 1
+    : Math.max(0, stages.indexOf(stage))
+  const labels = ['Build quote', 'Approval', 'Fulfillment', 'Negotiation', 'Complete']
 
   return (
     <div className="workflow-steps">
       {labels.map((label, index) => (
-        <span className={index <= activeIndex ? 'active' : ''} key={label}>
-          <i>{index < activeIndex ? <Check size={12} /> : index + 1}</i>
+        <span className={`${index <= activeIndex ? 'active' : ''}${index === activeIndex ? ' current' : ''}`} key={label}>
+          <i>{index < activeIndex || stage === 'COMPLETED' ? <Check size={12} /> : index + 1}</i>
           {label}
         </span>
       ))}
     </div>
   )
+}
+
+function formatRevisionDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Time unavailable'
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function revisionLineName(revision, productId) {
+  const product = (revision.quote?.products ?? []).find((item) =>
+    [item._id, item.article_id].some((value) => String(value) === String(productId)),
+  )
+  return product?.name ?? 'Quotation line'
 }
 
 function approvalCopy(calculation) {
@@ -156,6 +179,9 @@ export default function QuotationBuilderPage() {
     loading: false,
     error: null,
   })
+  const [revisionHistory, setRevisionHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
@@ -208,6 +234,32 @@ export default function QuotationBuilderPage() {
       active = false
     }
   }, [editable])
+
+  useEffect(() => {
+    if (!quote?.serverManaged) return undefined
+
+    let active = true
+    Promise.resolve()
+      .then(() => {
+        if (!active) return null
+        setHistoryLoading(true)
+        setHistoryError(null)
+        return quoteApi.getHistory(quoteId)
+      })
+      .then((result) => {
+        if (active && result) setRevisionHistory(result.revisions ?? [])
+      })
+      .catch((error) => {
+        if (active) setHistoryError(error)
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [quote?.serverManaged, quoteId])
 
   /**
    * The catalogue is paged and searched on the server. Fetching everything and
@@ -288,9 +340,21 @@ export default function QuotationBuilderPage() {
 
   async function refreshCurrentQuote() {
     try {
-      await loadQuote(quote.id)
-      toast.success('Quotation refreshed.')
+      const historyResult = await quoteApi.getHistory(quote.id)
+      const revisions = historyResult.revisions ?? []
+      setRevisionHistory(revisions)
+      setHistoryError(null)
+      const latest = revisions.find((revision) => revision.quote?.is_latest_quote)
+      const latestId = String(latest?.quote?._id ?? quote.id)
+      await loadQuote(latestId)
+      if (latestId !== quote.id) {
+        navigate(`/quotations/${latestId}`, { replace: true })
+        toast.success('Latest customer revision loaded.')
+      } else {
+        toast.success('Quotation refreshed.')
+      }
     } catch (error) {
+      setHistoryError(error)
       toast.error(error.message || 'Quotation could not be refreshed.')
     }
   }
@@ -394,11 +458,69 @@ export default function QuotationBuilderPage() {
           <p>Configure customer pricing, validate discounts live and route the quotation correctly.</p>
         </div>
         {!editable && (
-          <button className="button button--quiet" type="button" onClick={refreshCurrentQuote}>Refresh quotation</button>
+          <button className="button button--quiet" type="button" onClick={refreshCurrentQuote}><RefreshCw size={15} /> Refresh latest revision</button>
         )}
       </header>
 
       <WorkflowSteps stage={quote.stage} />
+
+      {quote.serverManaged && (
+        historyLoading ? (
+          <section className="negotiation-history-state"><span className="spinner" /> Loading revision history…</section>
+        ) : historyError ? (
+          <section className="negotiation-history-state negotiation-history-state--error">
+            <AlertTriangle size={17} />
+            <span>{historyError.message}</span>
+            <button className="link-button" type="button" onClick={refreshCurrentQuote}>Try again</button>
+          </section>
+        ) : (revisionHistory.length > 1 || ['NEGOTIATION', 'COMPLETED'].includes(quote.stage)) ? (
+          <Panel
+            title="Negotiation & revision history"
+            description="Customer requests create a new immutable quotation revision. The current revision stays open until the customer confirms it."
+            className="negotiation-history-panel"
+          >
+            <div className="negotiation-history-list">
+              {revisionHistory.map((revision) => {
+                const current = Boolean(revision.quote?.is_latest_quote)
+                const customerEvent = revision.customer_event
+                const confirmed = customerEvent?.type === 'CUSTOMER_QUOTATION_CONFIRMED'
+                return (
+                  <article className={current ? 'is-current' : ''} key={revision.quote?._id ?? revision.quote_version}>
+                    <span className="negotiation-history-marker">{confirmed ? <Check size={13} /> : revision.quote_version}</span>
+                    <div className="negotiation-history-copy">
+                      <header>
+                        <span><strong>Revision {revision.quote_version}</strong>{current && <em>Current</em>}</span>
+                        <span><StatusBadge status={revision.quote?.status} /><b>{formatMoney(revision.quote?.selling_price ?? 0)}</b></span>
+                      </header>
+                      <small>{formatRevisionDate(customerEvent?.occurred_at ?? revision.createdAt ?? revision.quote?.createdAt)}</small>
+                      {confirmed ? (
+                        <p className="negotiation-confirmed"><Check size={14} /> Customer confirmed this revision. Negotiation is complete.</p>
+                      ) : customerEvent ? (
+                        <div className="customer-request-detail">
+                          <strong><MessageSquareText size={14} /> Customer requested changes</strong>
+                          {customerEvent.change_request && <p>{customerEvent.change_request}</p>}
+                          {customerEvent.counter_discount !== null && (
+                            <p><b>Counter discount:</b> {customerEvent.counter_discount}%</p>
+                          )}
+                          {(customerEvent.line_comments ?? []).map((comment) => (
+                            <p key={`${comment.productId}-${comment.comment}`}>
+                              <b>{revisionLineName(revision, comment.productId)}:</b> {comment.comment}
+                            </p>
+                          ))}
+                        </div>
+                      ) : revision.quote?.reason ? (
+                        <p>{revision.quote.reason}</p>
+                      ) : (
+                        <p>Quotation terms recorded.</p>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </Panel>
+        ) : null
+      )}
 
       <section className="quote-customer-bar">
         <label>

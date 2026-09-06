@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import { asyncRoute } from '../http.js'
 import { requireInternalAuth, requireRoles } from '../middleware.js'
 import {
+  AuditEvent,
   CategoryDiscount,
   RISK_CONFIGURATION_ID,
   RiskConfiguration,
@@ -399,6 +400,72 @@ router.get(
   asyncRoute(async (req, res) => {
     const result = await callQuoteService(req, '/quote/approved_quotes')
     sendUpstreamResponse(req, res, result, 'list_approved')
+  }),
+)
+
+router.get(
+  '/:quote_id/history',
+  requireRoles(...quoteReaderRoles),
+  asyncRoute(async (req, res) => {
+    const visible = await assertQuoteVisible(req, res, req.params.quote_id)
+    if (!visible) return
+
+    const result = await callQuoteService(
+      req,
+      `/quote/${encodeURIComponent(req.params.quote_id)}/history`,
+    )
+    if (result.status >= 400) {
+      sendUpstreamResponse(req, res, result, 'get_history')
+      return
+    }
+
+    const quoteIds = (result.data.revisions ?? [])
+      .map((revision) => revision.quote?._id)
+      .filter(Boolean)
+      .map(String)
+    const customerEvents = quoteIds.length
+      ? await AuditEvent.find({
+          quotationId: { $in: quoteIds },
+          eventType: {
+            $in: [
+              'CUSTOMER_NEGOTIATION_SUBMITTED',
+              'CUSTOMER_QUOTATION_CONFIRMED',
+            ],
+          },
+        })
+          .sort({ occurredAt: -1, _id: -1 })
+          .lean()
+      : []
+    const eventByQuoteId = new Map()
+    for (const event of customerEvents) {
+      const eventQuoteId = String(event.quotationId)
+      if (!eventByQuoteId.has(eventQuoteId)) {
+        eventByQuoteId.set(eventQuoteId, event)
+      }
+    }
+
+    result.data.revisions = (result.data.revisions ?? []).map((revision) => {
+      const event = eventByQuoteId.get(String(revision.quote?._id))
+      return {
+        ...revision,
+        customer_event: event
+          ? {
+              type: event.eventType,
+              change_request: event.metadata?.changeRequest ?? '',
+              counter_discount: event.metadata?.counterDiscount ?? null,
+              line_comments: event.metadata?.lineComments ?? [],
+              occurred_at: event.occurredAt,
+            }
+          : null,
+      }
+    })
+
+    setRequestAttributes(req, {
+      'quote.id': req.params.quote_id,
+      'quote.negotiation.id': result.data.negotiation_id,
+      'quote.revision.count': result.data.revisions.length,
+    })
+    sendUpstreamResponse(req, res, result, 'get_history')
   }),
 )
 

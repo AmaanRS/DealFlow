@@ -54,6 +54,10 @@ export const quoteApi = {
     return request(`${QUOTE_BASE_URL}/${encodeURIComponent(quoteId)}`)
   },
 
+  getHistory(quoteId) {
+    return request(`${QUOTE_BASE_URL}/${encodeURIComponent(quoteId)}/history`)
+  },
+
   getInvoice(quoteId) {
     return request(`/v1/api/customer/${encodeURIComponent(quoteId)}/invoice`)
   },

@@ -774,7 +774,10 @@ export async function getQuoteHistory(req, res) {
     .lean();
   const quoteIds = revisions.map((revision) => revision.quote_id);
   const quotes = await Quote.find({ _id: { $in: quoteIds } })
-    .select("status selling_price risk is_latest_quote createdAt updatedAt")
+    .select(
+      "status selling_price risk reason products.name products.article_id " +
+        "products._id is_latest_quote createdAt updatedAt",
+    )
     .lean();
   const quoteById = new Map(
     quotes.map((quote) => [String(quote._id), quote]),
@@ -1042,6 +1045,13 @@ export async function updateQuotation(req, res) {
       subscriptions: [],
       subscriptionRevisions: [],
     };
+
+    // A negotiation may create any number of immutable quote revisions. The
+    // invoice shown after confirmation must belong to the final revision, not
+    // only to the revision that originally entered negotiation.
+    if (workflowResult.quote.status === "COMPLETED") {
+      workflowResult.billing = await createBillingInvoice(newQuote._id);
+    }
 
     if (
       currentQuote.status === "NEGOTIATION" &&

@@ -22,6 +22,7 @@ test('quotation read endpoints are registered on the gateway', () => {
     '/pricing_policy',
     '/get_quotes',
     '/approved_quotes',
+    '/:quote_id/history',
     '/:quote_id',
   ])
 })

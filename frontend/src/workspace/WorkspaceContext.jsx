@@ -105,6 +105,13 @@ function toWorkspaceQuote(quote) {
     },
     rep: quote.created_by,
     stage: quote.status,
+    reason: quote.reason ?? '',
+    revision: quote.revision
+      ? {
+          version: quote.revision.quote_version,
+          negotiationId: quote.revision.negotiation_id,
+        }
+      : null,
     validUntil: 'Not configured',
     createdAt: formatDate(quote.createdAt),
     inactivityDays: daysSince(quote.updatedAt),
@@ -201,7 +208,10 @@ export function WorkspaceProvider({ children, user }) {
 
   const loadQuote = useCallback(async (quoteId) => {
     const result = await quoteApi.get(quoteId)
-    const loadedQuote = toWorkspaceQuote(result.quote)
+    const loadedQuote = toWorkspaceQuote({
+      ...result.quote,
+      revision: result.revision,
+    })
     setQuotes((current) => [
       loadedQuote,
       ...current.filter((quote) => quote.id !== loadedQuote.id),
@@ -373,7 +383,10 @@ export function WorkspaceProvider({ children, user }) {
     const result = quote.serverManaged && quote.stage === 'DRAFT'
       ? await quoteApi.update({ quote_id: quote.id, updates })
       : await quoteApi.create(updates)
-    const persistedQuote = toWorkspaceQuote(result.quote)
+    const persistedQuote = toWorkspaceQuote({
+      ...result.quote,
+      revision: result.revision,
+    })
     setQuotes((current) => [
       persistedQuote,
       ...current.filter(
@@ -418,7 +431,10 @@ export function WorkspaceProvider({ children, user }) {
         quote_id: quoteId,
         updates: { status: nextStage },
       })
-      const persisted = toWorkspaceQuote(result.quote)
+      const persisted = toWorkspaceQuote({
+        ...result.quote,
+        revision: result.revision,
+      })
       // A revision is a new document, so swap the old id out rather than patch it.
       setQuotes((current) => [
         persisted,
@@ -442,7 +458,10 @@ export function WorkspaceProvider({ children, user }) {
       },
       user.role,
     )
-    const persisted = toWorkspaceQuote(result.quote)
+    const persisted = toWorkspaceQuote({
+      ...result.quote,
+      revision: result.revision,
+    })
     setQuotes((current) => [
       persisted,
       ...current.filter((item) => item.id !== quoteId && item.id !== persisted.id),

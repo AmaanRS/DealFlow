@@ -130,7 +130,7 @@ export default function QuotationsPage() {
       <PageHeader
         eyebrow="Sales workspace"
         title="Quotations"
-        description="Every quotation in the system. Drag a card between Draft and Pending Approval, or select one to open it."
+        description="Track each latest quotation from draft through customer negotiation and confirmation. Select one to review its revisions."
       />
 
       <section className="list-toolbar">
@@ -218,6 +218,7 @@ export default function QuotationsPage() {
                         )}
                         <strong>{quote.customer.name}</strong>
                         <span>{formatMoney(calculateQuote(quote).total)}</span>
+                        <small className="quote-board-card__revision">Revision {quote.revision?.version ?? 1}</small>
                       </div>
                     ))}
                     {!items.length && <div className="pipeline-empty">No deals in this stage</div>}
@@ -250,7 +251,7 @@ export default function QuotationsPage() {
               <tbody>
                 {filtered.map((quote) => (
                   <tr key={quote.id} onClick={() => openQuote(quote.id)}>
-                    <td><strong>{quote.id}</strong></td>
+                    <td><strong>{quote.id}</strong><small>Revision {quote.revision?.version ?? 1}</small></td>
                     <td><strong>{quote.customer.name}</strong><small>{quote.customer.tier}</small></td>
                     <td>{quote.rep}</td>
                     <td><strong>{formatMoney(calculateQuote(quote).total)}</strong></td>

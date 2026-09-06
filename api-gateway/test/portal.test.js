@@ -43,7 +43,7 @@ const quote = {
   created_by: 'sales@example.com',
   approved_by: 'manager@example.com',
   assigned_to: 'manager@example.com',
-  status: 'APPROVED',
+  status: 'NEGOTIATION',
   reason: 'Internal approval notes',
   subscription_details: [],
   createdAt: '2026-09-06T10:00:00.000Z',
@@ -126,6 +126,28 @@ test('customer quotation response exposes live commercial data without internal 
   assert.equal('reason' in result, false)
   assert.equal('assigned_to' in result, false)
   assert.equal('product_discount' in result.lines[0], false)
+})
+
+test('customer negotiation opens only after fulfillment starts negotiation', () => {
+  const approved = publicPortalQuotation(
+    { ...quote, status: 'APPROVED' },
+    revision,
+    invitation,
+  )
+  const completed = publicPortalQuotation(
+    { ...quote, status: 'COMPLETED' },
+    revision,
+    invitation,
+  )
+
+  assert.deepEqual(approved.capabilities, {
+    canNegotiate: false,
+    canConfirm: false,
+  })
+  assert.deepEqual(completed.capabilities, {
+    canNegotiate: false,
+    canConfirm: false,
+  })
 })
 
 test('customer quotation summary exposes the latest revision without internal pricing data', () => {

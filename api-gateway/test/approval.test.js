@@ -100,13 +100,14 @@ test('rejection is terminal and retains its reason', () => {
   assert.equal(result.nextReviewer, null)
 })
 
-test('a reviewer cannot decide a quote assigned to someone else', () => {
-  assert.throws(
-    () => buildApprovalUpdate({
-      quote: { ...pendingQuote, assigned_to: 'other-manager@example.com' },
-      decision: 'APPROVE',
-      reviewer: manager,
-    }),
-    (error) => error.code === 'QUOTE_NOT_ASSIGNED' && error.status === 403,
-  )
+test('a manager can decide a quote from the shared manager queue', () => {
+  const result = buildApprovalUpdate({
+    quote: { ...pendingQuote, assigned_to: 'other-manager@example.com' },
+    decision: 'APPROVE',
+    reviewer: manager,
+  })
+
+  assert.equal(result.updates.status, 'APPROVED')
+  assert.equal(result.updates.approved_by, manager.email)
+  assert.equal(result.updates.assigned_to, manager.email)
 })
